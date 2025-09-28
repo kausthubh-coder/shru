@@ -1,51 +1,107 @@
-# Welcome to your Convex + Next.js + Clerk app
+# AI Realtime Tutor (Next.js + Convex + Clerk)
 
-This is a [Convex](https://convex.dev/) project created with [`npm create convex`](https://www.npmjs.com/package/create-convex).
+This project is a Next.js app backed by Convex and authenticated with Clerk. It includes an experimental "Realtime Tutor" that uses OpenAI's Realtime API to converse with the user, draw on a tldraw whiteboard, and interact with a lightweight in-browser IDE (Monaco + Pyodide) — all from a single test page.
 
-After the initial setup (<2 minutes) you'll have a working full-stack app using:
+Use this repo as a foundation for an AI-first, realtime, multimodal experience. The production app structure is scaffolded; the prototype lives at `app/test-app/page.tsx` while the agent experience is iterated.
 
-- Convex as your backend (database, server logic)
-- [React](https://react.dev/) as your frontend (web page interactivity)
-- [Next.js](https://nextjs.org/) for optimized web hosting and page routing
-- [Tailwind](https://tailwindcss.com/) for building great looking accessible UI
-- [Clerk](https://clerk.com/) for authentication
+Highlights:
+- Auto-context per turn: the client attaches a compact JSON `view_context` (bounds + summarized shapes) and a viewport-bounded screenshot before each response.
+- Unified prompt: a single English‑only, realtime-voice prompt is injected via `session.update` after connect.
+- Initialization gating: the agent won’t respond until the session is configured; avoids early-turn drift.
+- Debug overlays: “Show Context” (exact JSON + image sent) and “Show Calls” (structured tool call feed) for fast debugging.
 
-## Get started
+## What’s inside
 
-If you just cloned this codebase and didn't use `npm create convex`, run:
+- Next.js App Router UI in `app/`
+- Convex backend in `convex/` (queries, mutations, actions, and HTTP endpoints)
+- Clerk auth wired into Next.js (`app/layout.tsx`)
+- Realtime tutor prototype at `app/test-app/page.tsx`
+  - Auto-context sender (`view_context` + image)
+  - English-only realtime prompt
+  - Debug overlays (Context/Calls)
+- Ephemeral token minting for OpenAI Realtime via `convex/realtime.ts` and `convex/http.ts`
+
+See in-depth docs in `docs/`:
+
+- `docs/architecture.md` — app layers and data flow
+- `docs/realtime-agent.md` — OpenAI Realtime integration, session gating, English‑only prompt, auto‑context strategy, and debug overlays
+- `docs/convex.md` — Convex functions, schema, and HTTP routes
+- `docs/test-app.md` — how to use the prototype page
+- `docs/troubleshooting.md` — common issues and fixes
+
+## Quick start
+
+Prerequisites:
+
+- Node.js 18+ and npm
+- Accounts: Convex, Clerk, and OpenAI
+
+1) Install dependencies
 
 ```
 npm install
+```
+
+2) Configure environment variables
+
+- Next.js (`.env.local`):
+  - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — Clerk publishable key
+  - `CLERK_SECRET_KEY` — Clerk secret (server-side)
+  - `NEXT_PUBLIC_CONVEX_SITE_URL` — your Convex Site URL (used by the test app to fetch the realtime token), e.g. `https://YOUR-DEPLOYMENT.convex.site`
+
+- Convex (set in the Convex Dashboard → Settings → Environment Variables):
+  - `OPENAI_API_KEY` — used by `convex/realtime.ts` to mint ephemeral client secrets
+  - `CLIENT_ORIGIN` — optional, restrict CORS for `/realtime/token` (defaults to `*` in dev)
+  - `CLERK_JWT_ISSUER_DOMAIN` — optional, if you wire Clerk auth into Convex functions
+
+3) Start dev servers (Next.js + Convex)
+
+```
 npm run dev
 ```
 
-If you're reading this README on GitHub and want to use this template, run:
+4) Open the app
+
+- App home: `http://localhost:3000/`
+- Server example: `http://localhost:3000/server`
+- Realtime tutor prototype: `http://localhost:3000/test-app`
+  - Dock → Start → grant mic access
+  - Toggle “Show Context” and “Show Calls” to inspect what the agent received and which tools it invoked
+
+## How it works (at a glance)
+
+1. The client fetches an ephemeral OpenAI Realtime client secret from Convex via `GET /realtime/token` (`convex/http.ts`).
+2. Convex calls the OpenAI API in `convex/realtime.ts` to mint the secret using `OPENAI_API_KEY` and returns `{ value: "ek_..." }`.
+3. The test page (`app/test-app/page.tsx`) initializes a `RealtimeAgent`, sets up a WebRTC transport, and registers a set of safe tools.
+4. The agent automatically receives compact whiteboard context and a screenshot, then speaks and acts via tool calls (align/move/create shapes, update labels, capture view, etc.).
+5. A single operating prompt is injected via `session.update` (English‑only, voice‑first, layout‑first). The app gates first turn until this completes.
+
+See `docs/realtime-agent.md` for the full flow and tool list.
+
+## Scripts
 
 ```
-npm create convex@latest -- -t nextjs-clerk
+npm run dev       # run Next.js and Convex in parallel
+npm run build     # Next.js production build
+npm start         # start Next.js in production
+npm run lint      # lint the Next.js app
 ```
 
-Then:
+## Key files & folders
 
-1. Open your app. There should be a "Claim your application" button from Clerk in the bottom right of your app.
-2. Follow the steps to claim your application and link it to this app.
-3. Follow step 3 in the [Convex Clerk onboarding guide](https://docs.convex.dev/auth/clerk#get-started) to create a Convex JWT template.
-4. Uncomment the Clerk provider in `convex/auth.config.ts`
-5. Paste the Issuer URL as `CLERK_JWT_ISSUER_DOMAIN` to your dev deployment environment variable settings on the Convex dashboard (see [docs](https://docs.convex.dev/auth/clerk#configuring-dev-and-prod-instances))
+- `app/layout.tsx` — wraps UI with `ClerkProvider` and `ConvexClientProvider`
+- `app/page.tsx` — sample Convex + Clerk usage
+- `app/test-app/page.tsx` — realtime tutor prototype (tldraw, Monaco/Pyodide, voice agent)
+- `convex/myFunctions.ts` — sample query/mutation (`listNumbers`, `addNumber`)
+- `convex/http.ts` — HTTP routes (CORS + `/realtime/token`)
+- `convex/realtime.ts` — internal action to mint OpenAI client secrets
+- `convex/schema.ts` — Convex schema
 
-If you want to sync Clerk user data via webhooks, check out this [example repo](https://github.com/thomasballinger/convex-clerk-users-table/).
+## Next steps
 
-## Learn more
+- Harden auth on `/realtime/token` by requiring a logged-in user
+- Evolve the whiteboard toolset and agent prompts
+- If your network is slow, consider a small debounce or initial session config to eliminate context/response races (see `docs/realtime-agent.md`).
+- Move prototype logic from `app/test-app/page.tsx` into production features
 
-To learn more about developing your project with Convex, check out:
-
-- The [Tour of Convex](https://docs.convex.dev/get-started) for a thorough introduction to Convex principles.
-- The rest of [Convex docs](https://docs.convex.dev/) to learn about all Convex features.
-- [Stack](https://stack.convex.dev/) for in-depth articles on advanced topics.
-
-## Join the community
-
-Join thousands of developers building full-stack apps with Convex:
-
-- Join the [Convex Discord community](https://convex.dev/community) to get help in real-time.
-- Follow [Convex on GitHub](https://github.com/get-convex/), star and contribute to the open-source implementation of Convex.
+For deeper details, open the docs in `docs/`.

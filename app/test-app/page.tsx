@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Tldraw } from "tldraw";
+import { Tldraw, Box } from "tldraw";
 import "tldraw/tldraw.css";
 import { TldrawAgent } from "../../agent/client/agent/TldrawAgent";
 import { AgentHelpers } from "../../agent/shared/AgentHelpers";
@@ -246,10 +246,25 @@ export default function TestAppPage() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const [muted, setMuted] = useState(false);
   const waitingResponseRef = useRef<boolean>(false);
+  const sessionReadyRef = useRef<boolean>(false);
 
   // Workspace UI state
   const [activeTab, setActiveTab] = useState<"whiteboard" | "code" | "notes">("whiteboard");
   const [showLogs, setShowLogs] = useState<boolean>(true);
+  const [showContext, setShowContext] = useState<boolean>(false);
+  const [showCalls, setShowCalls] = useState<boolean>(false);
+
+  // Debug: latest auto-context sent to the model
+  const [debugContext, setDebugContext] = useState<{
+    text?: string;
+    imageUrl?: string | null;
+    ts: number;
+  } | null>(null);
+
+  // Debug: structured tool call events
+  type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'|'error'; args?: any; result?: any; ms?: number; err?: string };
+  const [toolEvents, setToolEvents] = useState<Array<ToolEvent>>([]);
+  const [languageLock] = useState<boolean>(true);
 
   // Output (AI) audio meter
   const [outputLevel, setOutputLevel] = useState(0);
@@ -294,13 +309,33 @@ export default function TestAppPage() {
     const safeJson = (v: any, limit = 400) => {
       try { const s = JSON.stringify(v); return s.length > limit ? s.slice(0, limit) + '…' : s; } catch { return '[unserializable]'; }
     };
+    const summarizeDiff = (diff: any) => {
+      try {
+        let aS = 0, aO = 0, uS = 0, uO = 0, rS = 0, rO = 0;
+        for (const k in (diff?.added ?? {})) {
+          const rec = (diff.added as any)[k];
+          if (rec?.typeName === 'shape') aS++; else aO++;
+        }
+        for (const k in (diff?.updated ?? {})) {
+          const recAfter = (diff.updated as any)[k]?.[1];
+          if (recAfter?.typeName === 'shape') uS++; else uO++;
+        }
+        for (const k in (diff?.removed ?? {})) {
+          const rec = (diff.removed as any)[k];
+          if (rec?.typeName === 'shape') rS++; else rO++;
+        }
+        return `diff: +${aS}/${aO} ~${uS}/${uO} -${rS}/${rO}`;
+      } catch {
+        return 'diff: n/a';
+      }
+    };
     appendLog(`[act:start] rid=${rid} ${safeJson(action)}`);
     setToolBusy(true);
     try {
-      const { promise } = agent.act({ ...action, complete: true, time: 0 });
+      const { diff, promise } = agent.act({ ...action, complete: true, time: 0 });
       await promise;
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      appendLog(`[act:done] rid=${rid} ${Math.round(t1 - t0)}ms`);
+      appendLog(`[act:done] rid=${rid} ${Math.round(t1 - t0)}ms ${summarizeDiff(diff)}`);
     } catch (e: any) {
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       appendLog(`[act:error] rid=${rid} ${Math.round(t1 - t0)}ms ${String(e?.message ?? e)}`);
@@ -345,7 +380,7 @@ export default function TestAppPage() {
       return b && b.collides(viewport);
     });
     if (!shapes.length) return null;
-    const result = await editor.toImage(shapes, { format: "jpeg", background: true });
+    const result = await editor.toImage(shapes, { format: "jpeg", background: true, bounds: Box.From(viewport), padding: 0, pixelRatio: 1, scale: 1 });
     const blob = result.blob as Blob;
     const toDataUrl = () => new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -366,6 +401,122 @@ export default function TestAppPage() {
     if (!data?.value) throw new Error("Invalid token response");
     return data.value as string;
   }, []);
+
+  // Configure the realtime session (declared after helpers to avoid TDZ)
+  let configureSession = (async () => {}) as unknown as () => Promise<void>;
+
+  // Build multi-section tutor instructions
+  const buildTutorInstructions = useCallback(() => {
+    return [
+      '# Studi Tutor — Operating Rules',
+      '',
+      '## Role & Objective',
+      '- You are a friendly, concise human tutor on an infinite whiteboard. Teach, explain, and clarify while keeping the board tidy.',
+      '',
+      '## Style & Verbosity',
+      '- Voice output: 2–3 short sentences per turn; brisk but not rushed.',
+      '- Use plain language. Only brief tool preambles. Avoid rambling.',
+      '- Speak English only. Do not switch languages. If asked to switch, politely decline and continue in English.',
+      '',
+      '## Auto Context (use first)',
+      '- Before most responses you will receive: (1) a compact JSON block named "view_context" (viewport bounds + summarized shapes) and (2) a screenshot of the current viewport.',
+      '- Treat these as your primary context. Call extra tools only if you truly need more or to change the canvas.',
+      '',
+      '## Agentic Eagerness & Persistence',
+      '- Default reasoning effort: low-to-medium. Prefer quick, correct action over overthinking.',
+      '- Context gathering budget per turn: usually ≤ 2 tool calls. Escalate beyond this only if needed for correctness.',
+      '- You are an agent: keep going until the user\'s request is fully resolved. Do not hand back at uncertainty—make the most reasonable assumption, act, and note it.',
+      '',
+      '## Tool Preambles (concise)',
+      '- Rephrase the user\'s goal in one short sentence, then outline a 1–3 step plan.',
+      '- Before each tool call say one short line (e.g., “Let me align these.”). Keep status updates minimal.',
+      '- After a sequence of tools, give a one-line summary of what changed.',
+      '',
+      '## Whiteboard Reading & Layout',
+      '- For pen-drawn math/text, reason over the provided screenshot. If needed, zoom with agent_set_view, then optionally call agent_get_text_context (for visible text shapes only).',
+      '- Prefer layout tools (agent_align, agent_distribute, agent_stack, agent_place) over guessing coordinates.',
+      '- Use z-order tools only when overlapping matters.',
+      '- For drawing tasks (e.g., “draw a cat” or “make a simple math problem”), do not ask clarifying questions; choose sensible defaults and draw immediately. Use ellipses/triangles/rectangles, default sizes (~120×90), and place near the current viewport center.',
+      '',
+      '## Action Safety & Verification',
+      '- Perform small, atomic steps. After create/move/update, verify the result (e.g., shape exists; position change within tolerance). If verification fails, fix or roll back with a minimal correction.',
+      '- Ask for explicit confirmation before destructive actions (e.g., clearing the canvas).',
+      '',
+      '## Drawing Guidance',
+      '- Compose complex objects from multiple shapes. Prefer tint/background fills over large solid-black areas; choose contrasting strokes for clarity.',
+      '',
+      '## Markdown (when applicable)',
+      '- Use Markdown only when semantically helpful (bullets, short code fences, inline math). Keep it minimal in voice responses.',
+    ].join('\n');
+  }, []);
+
+  // Send compact auto-context (viewport + shapes + image)
+  const sendAutoContext = useCallback(async (triggerResponse: boolean = false) => {
+    const session = sessionRef.current;
+    const transport = session?.transport;
+    if (!transport) return 'no-session';
+    try {
+      const ctx = getViewContext();
+      const compact = {
+        type: 'view_context',
+        bounds: ctx.bounds,
+        blurryShapes: Array.isArray(ctx.blurryShapes) ? ctx.blurryShapes.slice(0, 60) : [],
+        peripheralClusters: Array.isArray(ctx.peripheralClusters) ? ctx.peripheralClusters.slice(0, 32) : [],
+        selectedShapes: Array.isArray(ctx.selectedShapes) ? ctx.selectedShapes.slice(0, 20) : [],
+      };
+      const text = JSON.stringify(compact);
+      appendLog(`[transport] conversation.item.create (auto-context text ${text.length} chars)`);
+      transport.sendEvent({
+        type: 'conversation.item.create',
+        item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+      });
+      const url = await getScreenshot();
+      if (url && url !== 'null') {
+        appendLog(`[transport] conversation.item.create (auto-context image length=${url.length})`);
+        transport.sendEvent({
+          type: 'conversation.item.create',
+          item: { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: url }] },
+        });
+      }
+      setDebugContext({ text, imageUrl: url ?? null, ts: Date.now() });
+      if (triggerResponse) {
+        appendLog('[transport] response.create (after auto-context)');
+        transport.sendEvent({ type: 'response.create' });
+      }
+      return 'ok';
+    } catch (e: any) {
+      appendLog(`auto-context error: ${String(e?.message ?? e)}`);
+      return 'error';
+    }
+  }, [appendLog, getViewContext, getScreenshot]);
+
+  // Now that helpers exist, define configureSession
+  configureSession = useCallback(async () => {
+    const session = sessionRef.current;
+    if (!session) return;
+    try {
+      appendLog('[transport] session.update -> tutor prompt, voice, modalities');
+      session.transport?.sendEvent?.({
+        type: 'session.update',
+        session: {
+          type: 'realtime',
+          model: 'gpt-realtime',
+          output_modalities: ['audio'],
+          audio: {
+            input: {
+              format: { type: 'audio/pcm', rate: 24000 },
+              turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: true, interrupt_response: true },
+            },
+            output: { format: { type: 'audio/pcm' }, voice: 'marin' },
+          },
+          instructions: buildTutorInstructions(),
+        },
+      } as any);
+      try { await sendAutoContext(false); } catch {}
+    } catch (e: any) {
+      appendLog(`session.update error: ${String(e?.message ?? e)}`);
+    }
+  }, [appendLog, buildTutorInstructions, sendAutoContext]);
 
   const addPython = useCallback(() => {
     const id = `python-${Date.now()}`;
@@ -443,20 +594,24 @@ export default function TestAppPage() {
       ) => async (args: any, details?: any) => {
         const rid = Math.random().toString(36).slice(2, 8);
         const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-        appendLog(`[tool:start] ${name} rid=${rid} args=${safeToolJson(args)}`);
+         appendLog(`[tool:start] ${name} rid=${rid} args=${safeToolJson(args)}`);
+        try { setToolEvents((prev: Array<ToolEvent>) => [{ ts: Date.now(), rid, name, status: 'start' as const, args }, ...prev].slice(0, 100)); } catch {}
         try {
-          const res = await fn(args, details);
+           const res = await fn(args, details);
           const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
           const ms = Math.round(t1 - t0);
-          appendLog(`[tool:done] ${name} rid=${rid} ${ms}ms result=${typeof res === 'string' ? res : safeToolJson(res)}`);
+           appendLog(`[tool:done] ${name} rid=${rid} ${ms}ms result=${typeof res === 'string' ? res : safeToolJson(res)}`);
+          try { setToolEvents((prev: Array<ToolEvent>) => [{ ts: Date.now(), rid, name, status: 'done' as const, result: res, ms }, ...prev].slice(0, 100)); } catch {}
           return res;
         } catch (e: any) {
           const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
           const ms = Math.round(t1 - t0);
-          appendLog(`[tool:error] ${name} rid=${rid} ${ms}ms err=${String(e?.message ?? e)}`);
+          const stack = e?.stack ? String(e.stack).slice(0, 600) : '';
+          appendLog(`[tool:error] ${name} rid=${rid} ${ms}ms err=${String(e?.message ?? e)}${stack ? ` stack=${stack}` : ''}`);
+          try { setToolEvents((prev: Array<ToolEvent>) => [{ ts: Date.now(), rid, name, status: 'error' as const, err: String(e?.message ?? e), ms }, ...prev].slice(0, 100)); } catch {}
           throw e;
         }
-      };
+       };
 
       // Tools — Agent Actions
       const agentDelete = tool({
@@ -493,18 +648,23 @@ export default function TestAppPage() {
           fill: z.enum(["none","tint","background","solid","pattern"]).default("none"),
         }),
         execute: wrapExecute("agent_create_shape", async ({ geo, x, y, w, h, text, color, fill }: any) => {
+          const nx = (typeof x === 'number' && isFinite(x)) ? x : null;
+          const ny = (typeof y === 'number' && isFinite(y)) ? y : null;
+          const nw = (typeof w === 'number' && isFinite(w)) ? w : null;
+          const nh = (typeof h === 'number' && isFinite(h)) ? h : null;
+          if (nx === null || ny === null) return 'invalid position';
+          if (nw === null || nh === null) return 'invalid size';
           await dispatchAction({
             _type: "create",
             intent: `Create ${geo}`,
             shape: {
-              _type: "geo",
+              _type: geo,
               shapeId: randomId(),
               note: "",
-              geo,
-              x,
-              y,
-              w,
-              h,
+              x: nx,
+              y: ny,
+              w: nw,
+              h: nh,
               text: text ?? undefined,
               color,
               fill,
@@ -529,18 +689,23 @@ export default function TestAppPage() {
           fill: z.enum(["none","tint","background","solid","pattern"]).default("none"),
         }),
         execute: wrapExecute("agent_create", async ({ geo, x, y, w, h, text, color, fill }: any) => {
+          const nx = (typeof x === 'number' && isFinite(x)) ? x : null;
+          const ny = (typeof y === 'number' && isFinite(y)) ? y : null;
+          const nw = (typeof w === 'number' && isFinite(w)) ? w : null;
+          const nh = (typeof h === 'number' && isFinite(h)) ? h : null;
+          if (nx === null || ny === null) return 'invalid position';
+          if (nw === null || nh === null) return 'invalid size';
           await dispatchAction({
             _type: "create",
             intent: `Create ${geo}`,
             shape: {
-              _type: "geo",
+              _type: geo,
               shapeId: randomId(),
               note: "",
-              geo,
-              x,
-              y,
-              w,
-              h,
+              x: nx,
+              y: ny,
+              w: nw,
+              h: nh,
               text: text ?? undefined,
               color,
               fill,
@@ -907,18 +1072,9 @@ export default function TestAppPage() {
       });
 
       const agent = new RealtimeAgent({
-        name: "Tutor",
-        instructions: [
-          "You are a helpful tutor working on an infinite canvas.",
-          "Before any mutation, call agent_get_view_context. If needed, call agent_get_screenshot.",
-          "Perform small, atomic actions and narrate briefly before invoking a tool.",
-          "Prefer layout actions (agent_align, agent_distribute, agent_stack, agent_place) over guessing coordinates.",
-          "When drawing complex objects (e.g., a cat), compose multiple geo shapes (ellipses for head/body/eyes, triangles for ears) and use agent_update to color/fill appropriately. Use agent_pen sparingly for fine details (whiskers, curves). Avoid solid-black fills for large areas; prefer 'tint' or 'background' fills and use contrasting stroke colors.",
-          "When reading content (e.g., math on the board), first zoom to the relevant area with agent_set_view, then call agent_send_view_image and agent_get_text_context; reason over the image and extracted text.",
-          "Use z-order tools only when overlapping matters.",
-          "If a tool fails, correct inputs and retry with minimal changes.",
-          "You can also work in a code IDE (ide_* tools) and a markdown Notes doc (notes_* tools).",
-        ].join("\n"),
+        name: "Studi",
+        // Keep initial instructions minimal; the full operating rules are injected via session.update
+        instructions: "Studi is a realtime voice tutor. Speak naturally and concisely.",
         tools: [
           agentGetViewContext,
           agentGetScreenshot,
@@ -1036,31 +1192,13 @@ export default function TestAppPage() {
         audioElement: audioRef.current ?? document.createElement("audio"),
       });
 
-      const session = new RealtimeSession(agent, { model: "gpt-realtime", transport });
+      const session = new RealtimeSession(agent, { model: "gpt-realtime", transport, config: { inputAudioTranscription: { model: 'gpt-4o-mini-transcribe', language: 'en' } } });
       sessionRef.current = session;
       await session.connect({ apiKey: token });
       setAgentStatus("connected");
       appendLog("Agent connected");
-      try {
-        // Ensure audio output is enabled and voice is selected
-        appendLog('[transport] session.update -> audio voice=marin, output=audio');
-        session.transport?.sendEvent?.({
-          type: 'session.update',
-          session: {
-            type: 'realtime',
-            model: 'gpt-realtime',
-            output_modalities: ['audio'],
-            audio: {
-              output: {
-                format: { type: 'audio/pcm' },
-                voice: 'marin',
-              },
-            },
-          },
-        } as any);
-      } catch (e) {
-        appendLog(`session.update error: ${String((e as any)?.message ?? e)}`);
-      }
+      // Configure session with tutor instructions and send initial auto-context
+      try { await configureSession(); sessionReadyRef.current = true; } catch (e) { appendLog(`configureSession error: ${String((e as any)?.message ?? e)}`); }
       try {
         if (audioRef.current) {
           audioRef.current.muted = false;
@@ -1121,13 +1259,32 @@ export default function TestAppPage() {
         const off = session.transport?.on?.("*", (evt: any) => {
           if (!evt || !evt.type) return;
           appendLog(`[evt] ${evt.type}`);
+          // Minimal transcript/text previews for debugging
+          try {
+            if (evt.type === 'response.output_audio_transcript.delta') {
+              const d = String((evt as any)?.delta ?? '');
+              if (d) {
+                appendLog(`[transcript.delta] ${d.slice(0,160)}${d.length>160?'…':''}`);
+                if (languageLock) maybeReassertLanguage(d);
+              }
+            }
+            if (evt.type === 'response.output_text.delta') {
+              const d = String((evt as any)?.delta ?? '');
+              if (d) appendLog(`[text.delta] ${d.slice(0,160)}${d.length>160?'…':''}`);
+            }
+            if (evt.type === 'invalid_request_error' || evt.type === 'error') {
+              const code = (evt as any)?.code ?? 'n/a';
+              const msg = (evt as any)?.message ?? 'n/a';
+              appendLog(`[server-error] code=${code} msg=${msg}`);
+            }
+          } catch {}
           if (evt.type === "input_audio_buffer.speech_started") setUserSpeaking(true);
           if (evt.type === "input_audio_buffer.speech_stopped") {
             setUserSpeaking(false);
             if (!waitingResponseRef.current) {
               waitingResponseRef.current = true;
-              appendLog('[transport] response.create (on speech_stopped)');
-              try { session.transport?.sendEvent?.({ type: 'response.create' }); } catch {}
+              appendLog('[transport] auto-context + response.create (on speech_stopped)');
+              try { if (sessionReadyRef.current) sendAutoContext(true); } catch {}
             }
           }
           if (evt.type === "response.output_audio.delta") setAgentSpeaking(true);
@@ -1185,6 +1342,29 @@ export default function TestAppPage() {
     try { await audioCtxRef.current?.close?.(); } catch {}
     audioCtxRef.current = null;
   }, [agentStatus, appendLog]);
+
+  // Soft language guard: if the model drifts away from English, gently re-assert
+  const maybeReassertLanguage = useCallback((delta: string) => {
+    try {
+      // Detect a high ratio of non-ASCII letters as a proxy for non-English
+      const nonAscii = delta.replace(/[\x00-\x7F]/g, '').length;
+      if (nonAscii > 8) {
+        const session = sessionRef.current;
+        appendLog('[language] reassert English preference via session.update');
+        session?.transport?.sendEvent?.({
+          type: 'session.update',
+          session: {
+            type: 'realtime',
+            instructions: buildTutorInstructions(),
+            audio: {
+              input: { format: { type: 'audio/pcm', rate: 24000 }, turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: true, interrupt_response: true } },
+              output: { format: { type: 'audio/pcm' }, voice: 'marin' },
+            },
+          },
+        } as any);
+      }
+    } catch {}
+  }, [appendLog, buildTutorInstructions]);
 
   const toggleMute = useCallback(() => {
     const next = !muted;
@@ -1347,6 +1527,8 @@ export default function TestAppPage() {
         </div>
         <div className="flex items-center gap-2">
               <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setShowLogs((v) => !v)}>{showLogs ? 'Hide Logs' : 'Show Logs'}</button>
+              <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setShowContext((v) => !v)}>{showContext ? 'Hide Context' : 'Show Context'}</button>
+              <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setShowCalls((v) => !v)}>{showCalls ? 'Hide Calls' : 'Show Calls'}</button>
               <button className="px-2 py-1 rounded border text-[11px]" onClick={addPython}>+ Py</button>
           </div>
         </div>
@@ -1367,6 +1549,54 @@ export default function TestAppPage() {
             ))}
           </ul>
         </div>
+        </div>
+      )}
+
+      {/* Context window (top-left) */}
+      {showContext && (
+        <div className="fixed left-4 top-4 z-40 w-[420px] max-h-[60vh] bg-white/90 dark:bg-slate-900/90 backdrop-blur border rounded-xl shadow-lg overflow-hidden">
+          <div className="h-9 px-3 flex items-center justify-between border-b">
+            <div className="text-sm">Auto Context</div>
+            <button className="text-xs px-2 py-1 rounded border" onClick={() => setShowContext(false)}>Close</button>
+          </div>
+          <div className="p-3 space-y-2 text-xs overflow-auto" style={{ maxHeight: 'calc(60vh - 2.25rem)' }}>
+            <div className="text-[11px] text-slate-500">Last sent: {debugContext ? new Date(debugContext.ts).toLocaleTimeString() : '—'}</div>
+            <div>
+              <div className="font-medium mb-1">view_context (JSON)</div>
+              <pre className="whitespace-pre-wrap break-words">{debugContext?.text ?? '—'}</pre>
+            </div>
+            <div>
+              <div className="font-medium mb-1">viewport image</div>
+              {debugContext?.imageUrl ? (
+                <img src={debugContext.imageUrl} alt="viewport" className="w-full border rounded" />
+              ) : (
+                <div className="text-slate-500">—</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tool calls window (bottom-left) */}
+      {showCalls && (
+        <div className="fixed left-4 bottom-24 z-40 w-[420px] max-h-[40vh] bg-white/90 dark:bg-slate-900/90 backdrop-blur border rounded-xl shadow-lg overflow-hidden">
+          <div className="h-9 px-3 flex items-center justify-between border-b">
+            <div className="text-sm">Tool Calls</div>
+            <button className="text-xs px-2 py-1 rounded border" onClick={() => setShowCalls(false)}>Close</button>
+          </div>
+          <div className="p-2 h-[calc(40vh-2.25rem)] overflow-auto">
+            <ul className="text-xs space-y-1">
+              {toolEvents.map((e, i) => (
+                <li key={i} className="flex gap-2">
+                  <span className="text-[10px] text-slate-500">{new Date(e.ts).toLocaleTimeString()}</span>
+                  <span className={`text-[10px] ${e.status==='error' ? 'text-red-600' : e.status==='done' ? 'text-emerald-600' : 'text-slate-700'}`}>{e.status}</span>
+                  <span className="text-[10px] font-mono">{e.name}</span>
+                  {typeof e.ms === 'number' && <span className="text-[10px] text-slate-500">{e.ms}ms</span>}
+                  <span className="text-[10px] text-slate-500">rid={e.rid}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       )}
 
