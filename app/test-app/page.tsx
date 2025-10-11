@@ -1,240 +1,42 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
-import { Tldraw, Box } from "tldraw";
+import { Tldraw } from "tldraw";
 import "tldraw/tldraw.css";
-import { TldrawAgent } from "../../agent/client/agent/TldrawAgent";
-import { AgentHelpers } from "../../agent/shared/AgentHelpers";
-import { convertTldrawShapeToSimpleShape } from "../../agent/shared/format/convertTldrawShapeToSimpleShape";
-import { convertTldrawShapeToBlurryShape } from "../../agent/shared/format/convertTldrawShapeToBlurryShape";
-import { convertTldrawShapesToPeripheralShapes } from "../../agent/shared/format/convertTldrawShapesToPeripheralShapes";
+// Local minimal helpers to avoid missing agent/shared imports
+import { AIVoiceAgentPanel } from "./components/AIVoiceAgentPanel";
+import { loadPyodideOnce } from "./lib/pyodide";
+import { buildTutorInstructions } from "./lib/realtimeInstructions";
+import { buildTutorInstructions as buildPersonaInstructions } from "./prompts/tutor";
+import { getViewContext as computeViewContext, getViewportScreenshot } from "./lib/viewContext";
+import { sendAutoContext as sendAutoContextService } from "./services/autoContext";
+import { sendAutoContext as sendAutoContextCombined } from "./services/context";
+import { buildAllTools } from "./agent/registry";
+import { AgentRuntime } from "./types/toolContracts";
+import { createRealtimeSessionHandle } from "./agent/session";
+import { buildRuntime } from "./agent/runtime";
+import { NotesEditor } from "./components/NotesEditor";
+import { NotesRenderer } from "./components/NotesRenderer";
+import { serializeNotesYaml, NotesDocT, parseNotesYaml } from "./types/notesYaml";
 
 // Dynamically load Monaco on client only
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
 });
 
-declare global {
-  interface Window {
-    loadPyodide?: (opts: { indexURL: string }) => Promise<any>;
-  }
-}
-
-let pyodideInstancePromise: Promise<any> | null = null;
-async function loadPyodideOnce() {
-  if (!pyodideInstancePromise) {
-    pyodideInstancePromise = new Promise<void>((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js";
-      script.onload = () => resolve();
-      script.onerror = reject;
-      document.head.appendChild(script);
-    }).then(() => {
-      if (!window.loadPyodide) throw new Error("Pyodide loader not found");
-      return window.loadPyodide({
-        indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.0/full/",
-      });
-    });
-  }
-  return pyodideInstancePromise;
-}
-
-type PythonWindowState = {
-  id: string;
-  title: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  code: string;
-  outputs: Array<{ type: "stdout" | "stderr"; text: string; ts: number }>;
-};
-
-function useDragResize(
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  onChange: (next: { x: number; y: number; w: number; h: number }) => void,
-) {
-  const draggingRef = useRef<{
-    kind: "move" | "resize" | null;
-    startX: number;
-    startY: number;
-    origX: number;
-    origY: number;
-    origW: number;
-    origH: number;
-  } | null>(null);
-
-  const onPointerMove = useCallback(
-    (e: PointerEvent) => {
-      const s = draggingRef.current;
-      if (!s) return;
-      e.preventDefault();
-      const dx = e.clientX - s.startX;
-      const dy = e.clientY - s.startY;
-      if (s.kind === "move") {
-        onChange({ x: s.origX + dx, y: s.origY + dy, w, h });
-      } else if (s.kind === "resize") {
-        const minW = 360;
-        const minH = 240;
-        onChange({
-          x,
-          y,
-          w: Math.max(minW, s.origW + dx),
-          h: Math.max(minH, s.origH + dy),
-        });
-      }
-    },
-    [onChange, w, h, x, y],
-  );
-
-  const endDrag = useCallback(() => {
-    draggingRef.current = null;
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", endDrag);
-  }, [onPointerMove]);
-
-  const beginMove = useCallback(
-    (e: React.PointerEvent) => {
-      draggingRef.current = {
-        kind: "move",
-        startX: e.clientX,
-        startY: e.clientY,
-        origX: x,
-        origY: y,
-        origW: w,
-        origH: h,
-      };
-      window.addEventListener("pointermove", onPointerMove, { passive: false });
-      window.addEventListener("pointerup", endDrag);
-    },
-    [x, y, w, h, onPointerMove, endDrag],
-  );
-
-  const beginResize = useCallback(
-    (e: React.PointerEvent) => {
-      draggingRef.current = {
-        kind: "resize",
-        startX: e.clientX,
-        startY: e.clientY,
-        origX: x,
-        origY: y,
-        origW: w,
-        origH: h,
-      };
-      window.addEventListener("pointermove", onPointerMove, { passive: false });
-      window.addEventListener("pointerup", endDrag);
-    },
-    [x, y, w, h, onPointerMove, endDrag],
-  );
-
-  return { beginMove, beginResize };
-}
-
-function PythonWindow({
-  win,
-  onChange,
-  onClose,
-}: {
-  win: PythonWindowState;
-  onChange: (next: Partial<PythonWindowState>) => void;
-  onClose: () => void;
-}) {
-  const { beginMove, beginResize } = useDragResize(
-    win.x,
-    win.y,
-    win.w,
-    win.h,
-    ({ x, y, w, h }) => onChange({ x, y, w, h }),
-  );
-
-  const [running, setRunning] = useState(false);
-
-  const runCode = useCallback(async () => {
-    try {
-      setRunning(true);
-      const pyodide = await loadPyodideOnce();
-      // Redirect stdout/stderr
-      const out: Array<{ type: "stdout" | "stderr"; text: string; ts: number }> = [];
-      const print = (s: string) => out.push({ type: "stdout", text: String(s), ts: Date.now() });
-      const printerr = (s: string) => out.push({ type: "stderr", text: String(s), ts: Date.now() });
-      pyodide.setStdout({ batched: (s: string) => print(s) });
-      pyodide.setStderr({ batched: (s: string) => printerr(s) });
-      await pyodide.runPythonAsync(win.code);
-      onChange({ outputs: [...win.outputs, ...out] });
-    } catch (err: any) {
-      onChange({ outputs: [...win.outputs, { type: "stderr", text: String(err?.message ?? err), ts: Date.now() }] });
-    } finally {
-      setRunning(false);
-    }
-  }, [win.code, win.outputs, onChange]);
-
-  return (
-    <div
-      className="absolute rounded-lg border bg-white/90 dark:bg-slate-900/90 shadow-lg overflow-hidden"
-      style={{ left: win.x, top: win.y, width: win.w, height: win.h }}
-    >
-      <div
-        className="h-9 px-3 flex items-center justify-between border-b bg-slate-50 dark:bg-slate-800 cursor-move select-none"
-        onPointerDown={beginMove}
-      >
-        <div className="text-sm font-medium">{win.title}</div>
-        <div className="flex items-center gap-2">
-          <button
-            className="text-xs px-2 py-1 rounded border"
-            onClick={runCode}
-            disabled={running}
-          >
-            {running ? "Running..." : "Run"}
-          </button>
-          <button className="text-xs px-2 py-1 rounded border" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-      <div className="w-full h-[60%]">
-        <MonacoEditor
-          theme="vs-dark"
-          defaultLanguage="python"
-          value={win.code}
-          onChange={(v) => onChange({ code: v ?? "" })}
-          options={{ fontSize: 14, minimap: { enabled: false } }}
-        />
-      </div>
-      <div className="w-full h-[40%] border-t overflow-auto bg-slate-50 dark:bg-slate-900">
-        <div className="p-2 space-y-1 text-xs">
-          {win.outputs.length === 0 ? (
-            <div className="text-slate-500">Outputs will appear here…</div>
-          ) : (
-            win.outputs.map((o, i) => (
-              <pre key={i} className={o.type === "stderr" ? "text-red-600" : "text-slate-800 dark:text-slate-100"}>
-                {o.text}
-              </pre>
-            ))
-          )}
-        </div>
-      </div>
-      <div
-        className="absolute right-0 bottom-0 w-4 h-4 cursor-se-resize"
-        onPointerDown={beginResize}
-      />
-    </div>
-  );
-}
 
 export default function TestAppPage() {
-  const [windows, setWindows] = useState<Array<PythonWindowState>>([]);
   const editorRef = useRef<any>(null);
   const agentRef = useRef<any>(null);
 
   // Voice agent/session state
   const sessionRef = useRef<any>(null);
+  const sessionHandleRef = useRef<any>(null);
   const [agentStatus, setAgentStatus] = useState<"disconnected"|"connecting"|"connected">("disconnected");
   const [toolBusy, setToolBusy] = useState(false);
   const [logs, setLogs] = useState<Array<string>>([]);
+  const appendLog = useCallback((line: string) => setLogs((l) => [line, ...l].slice(0, 50)), []);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
@@ -244,15 +46,26 @@ export default function TestAppPage() {
   const rafRef = useRef<number | null>(null);
   const unsubTransportRef = useRef<null | (() => void)>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const tokenPromiseRef = useRef<Promise<string> | null>(null);
   const [muted, setMuted] = useState(false);
   const waitingResponseRef = useRef<boolean>(false);
   const sessionReadyRef = useRef<boolean>(false);
+  const currentTurnRef = useRef<any | null>(null);
+  const lastLangAssertRef = useRef<number>(0);
+  const sessionTurnsRef = useRef<Array<any>>([]);
+  const [inputDevices, setInputDevices] = useState<Array<MediaDeviceInfo>>([]);
+  const [outputDevices, setOutputDevices] = useState<Array<MediaDeviceInfo>>([]);
+  const [selectedInputId, setSelectedInputId] = useState<string>("");
+  const [selectedOutputId, setSelectedOutputId] = useState<string>("");
+  const [pushToTalk, setPushToTalk] = useState<boolean>(false);
+  const [vadEagerness, setVadEagerness] = useState<'low'|'medium'|'high'>('medium');
 
   // Workspace UI state
   const [activeTab, setActiveTab] = useState<"whiteboard" | "code" | "notes">("whiteboard");
   const [showLogs, setShowLogs] = useState<boolean>(true);
   const [showContext, setShowContext] = useState<boolean>(false);
   const [showCalls, setShowCalls] = useState<boolean>(false);
+  const [showSaveLog, setShowSaveLog] = useState<boolean>(false);
 
   // Debug: latest auto-context sent to the model
   const [debugContext, setDebugContext] = useState<{
@@ -260,6 +73,21 @@ export default function TestAppPage() {
     imageUrl?: string | null;
     ts: number;
   } | null>(null);
+
+  // When auto-context updates, attach details to the current turn and log
+  useEffect(() => {
+    try {
+      if (debugContext && currentTurnRef.current) {
+        const jsonChars = (debugContext.text ?? '').length;
+        const imgLen = debugContext.imageUrl ? debugContext.imageUrl.length : 0;
+        currentTurnRef.current.contextChars = jsonChars;
+        currentTurnRef.current.imageLen = imgLen;
+        appendLog(`[turn:context] id=${currentTurnRef.current.id} json=${jsonChars} image=${imgLen}`);
+        const snippet = (debugContext.text ?? '').slice(0, 300);
+        if (snippet) appendLog(`[turn:context.json] id=${currentTurnRef.current.id} ${snippet}${(debugContext.text ?? '').length>300?'…':''}`);
+      }
+    } catch {}
+  }, [debugContext, appendLog]);
 
   // Debug: structured tool call events
   type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'|'error'; args?: any; result?: any; ms?: number; err?: string };
@@ -269,6 +97,25 @@ export default function TestAppPage() {
   // Output (AI) audio meter
   const [outputLevel, setOutputLevel] = useState(0);
   const rafOutRef = useRef<number | null>(null);
+
+  // Media device enumeration
+  const refreshDevices = useCallback(async () => {
+    try {
+      const list = await navigator.mediaDevices.enumerateDevices();
+      setInputDevices(list.filter((d) => d.kind === 'audioinput'));
+      setOutputDevices(list.filter((d) => d.kind === 'audiooutput'));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      refreshDevices();
+      navigator.mediaDevices.addEventListener?.('devicechange', refreshDevices);
+      return () => {
+        try { navigator.mediaDevices.removeEventListener?.('devicechange', refreshDevices); } catch {}
+      };
+    } catch {}
+  }, [refreshDevices]);
 
   // Simple in-memory IDE workspace
   type IdeFile = { id: string; name: string; language: string; content: string };
@@ -294,12 +141,86 @@ export default function TestAppPage() {
     setActiveFileId(id);
   }, []);
 
-  // Notes / markdown doc content
-  const [notesText, setNotesText] = useState<string>("# Notes\nWrite here…\n");
-
-  const appendLog = useCallback((line: string) => setLogs((l) => [line, ...l].slice(0, 50)), []);
+  // Notes YAML document
+  const initialYaml: NotesDocT = {
+    title: "Notes",
+    version: 1,
+    blocks: [
+      { type: 'text', md: 'Write here…' } as any,
+    ],
+  };
+  const [notesYaml, setNotesYaml] = useState<string>(() => serializeNotesYaml(initialYaml));
+  const [showYaml, setShowYaml] = useState<boolean>(false);
 
   const randomId = useCallback(() => Math.random().toString(36).slice(2), []);
+
+  const playTestTone = useCallback(async () => {
+    try {
+      const AudioContextCtor: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextCtor();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 440;
+      gain.gain.value = 0.1;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      setTimeout(() => { try { osc.stop(); ctx.close(); } catch {} }, 600);
+    } catch {}
+  }, []);
+
+  const applyVadEagerness = useCallback((eag: 'low'|'medium'|'high') => {
+    setVadEagerness(eag);
+    try {
+      sessionRef.current?.transport?.sendEvent?.({
+        type: 'session.update',
+        session: {
+          type: 'realtime',
+          audio: {
+            input: { turn_detection: { type: 'semantic_vad', eagerness: eag, create_response: false, interrupt_response: false } },
+          },
+        },
+      });
+    } catch {}
+  }, [sessionRef]);
+
+  // IDE console state
+  const [showConsole, setShowConsole] = useState<boolean>(true);
+  type IdeOutput = { type: "stdout" | "stderr" | "info"; text: string; ts: number };
+  const [ideOutputs, setIdeOutputs] = useState<Array<IdeOutput>>([]);
+  const [ideRunning, setIdeRunning] = useState<boolean>(false);
+  const languageOptions = [
+    { value: 'python', label: 'Python' },
+    { value: 'typescript', label: 'TypeScript' },
+    { value: 'javascript', label: 'JavaScript' },
+    { value: 'cpp', label: 'C++' },
+    { value: 'java', label: 'Java' },
+  ];
+
+  const runActiveFile = useCallback(async () => {
+    const lang = (activeFile?.language ?? '').toLowerCase();
+    if (!activeFile) return;
+    if (lang !== 'python') {
+      setIdeOutputs((prev) => [{ type: 'info', text: 'Run currently supports Python only. Switch language to Python to execute.', ts: Date.now() }, ...prev]);
+      return;
+    }
+    try {
+      setIdeRunning(true);
+      const pyodide = await loadPyodideOnce();
+      const out: Array<IdeOutput> = [];
+      const pushOut = (type: IdeOutput['type'], s: string) => out.push({ type, text: String(s), ts: Date.now() });
+      pyodide.setStdout({ batched: (s: string) => pushOut('stdout', s) });
+      pyodide.setStderr({ batched: (s: string) => pushOut('stderr', s) });
+      await pyodide.runPythonAsync(activeFile.content);
+      setIdeOutputs((prev) => [...out, ...prev].slice(0, 500));
+    } catch (err: any) {
+      setIdeOutputs((prev) => [{ type: 'stderr', text: String(err?.message ?? err), ts: Date.now() }, ...prev]);
+    } finally {
+      setIdeRunning(false);
+    }
+  }, [activeFile]);
+
+  const clearConsole = useCallback(() => setIdeOutputs([]), []);
 
   const dispatchAction = useCallback(async (action: any) => {
     const agent = agentRef.current;
@@ -330,15 +251,23 @@ export default function TestAppPage() {
       }
     };
     appendLog(`[act:start] rid=${rid} ${safeJson(action)}`);
+    try {
+      // Developer console visibility for conversions into tldraw actions
+      console.log('[act:start]', { rid, action });
+    } catch {}
     setToolBusy(true);
     try {
-      const { diff, promise } = agent.act({ ...action, complete: true, time: 0 });
+      const mapped = { ...action, complete: true, time: 0 };
+      try { console.log('[act:map]', { rid, mapped }); } catch {}
+      const { diff, promise } = agent.act(mapped);
       await promise;
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       appendLog(`[act:done] rid=${rid} ${Math.round(t1 - t0)}ms ${summarizeDiff(diff)}`);
+      try { console.log('[act:done]', { rid, ms: Math.round(t1 - t0), diff }); } catch {}
     } catch (e: any) {
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       appendLog(`[act:error] rid=${rid} ${Math.round(t1 - t0)}ms ${String(e?.message ?? e)}`);
+      try { console.error('[act:error]', { rid, error: e }); } catch {}
       throw e;
     } finally {
       setToolBusy(false);
@@ -346,149 +275,58 @@ export default function TestAppPage() {
   }, [appendLog]);
 
   const getViewContext = useCallback(() => {
-    const editor = editorRef.current;
-    const agent = agentRef.current;
-    if (!editor || !agent) throw new Error("Editor/agent not ready");
-    const helpers = new AgentHelpers(agent);
-    const viewport = editor.getViewportPageBounds();
-    const bounds = helpers.applyOffsetToBox(viewport);
-    const allShapes = editor.getCurrentPageShapesSorted();
-    const inView = allShapes.filter((s: any) => {
-      const b = editor.getShapeMaskedPageBounds(s);
-      return b && b.collides(viewport);
-    });
-    const outView = allShapes.filter((s: any) => {
-      const b = editor.getShapeMaskedPageBounds(s);
-      return b && !b.collides(viewport);
-    });
-    const blurryShapes = inView
-      .map((s: any) => convertTldrawShapeToBlurryShape(editor, s))
-      .filter(Boolean);
-    const peripheralClusters = convertTldrawShapesToPeripheralShapes(editor, outView, { padding: 8 });
-    const selectedShapes = editor
-      .getSelectedShapes()
-      .map((shape: any) => convertTldrawShapeToSimpleShape(editor, shape));
-    return { bounds, blurryShapes, peripheralClusters, selectedShapes };
+    return computeViewContext(editorRef.current, agentRef.current);
   }, []);
 
   const getScreenshot = useCallback(async () => {
-    const editor = editorRef.current;
-    if (!editor) throw new Error("Editor not ready");
-    const viewport = editor.getViewportPageBounds();
-    const shapes = editor.getCurrentPageShapesSorted().filter((s: any) => {
-      const b = editor.getShapeMaskedPageBounds(s);
-      return b && b.collides(viewport);
-    });
-    if (!shapes.length) return null;
-    const result = await editor.toImage(shapes, { format: "jpeg", background: true, bounds: Box.From(viewport), padding: 0, pixelRatio: 1, scale: 1 });
-    const blob = result.blob as Blob;
-    const toDataUrl = () => new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    return await toDataUrl();
+    return await getViewportScreenshot(editorRef.current);
   }, []);
 
   const fetchEphemeralToken = useCallback(async () => {
-    // Prefer configured Convex site URL; fallback to known deployment to avoid 404s on Next host
-    const base = (process.env.NEXT_PUBLIC_CONVEX_SITE_URL as string | undefined) ?? "https://adorable-canary-627.convex.site";
-    const url = `${base.replace(/\/$/, "")}/realtime/token`;
-    const res = await fetch(url, { method: "GET" });
-    if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`);
-    const data = await res.json();
-    if (!data?.value) throw new Error("Invalid token response");
-    return data.value as string;
+    // Accept NEXT_PUBLIC_CONVEX_SITE_URL or derive from NEXT_PUBLIC_CONVEX_URL by replacing convex.cloud → convex.site
+    const deriveSiteFromCloud = (cloudUrl: string | undefined): string | null => {
+      if (!cloudUrl) return null;
+      try {
+        const u = new URL(cloudUrl);
+        const host = u.host.replace("convex.cloud", "convex.site");
+        return `${u.protocol}//${host}`;
+      } catch {
+        return null;
+      }
+    };
+    const siteBase = (process.env.NEXT_PUBLIC_CONVEX_SITE_URL as string | undefined) || deriveSiteFromCloud(process.env.NEXT_PUBLIC_CONVEX_URL as string | undefined);
+    if (!siteBase) throw new Error("Convex site URL is not configured. Set NEXT_PUBLIC_CONVEX_SITE_URL or NEXT_PUBLIC_CONVEX_URL.");
+    if (tokenPromiseRef.current) return await tokenPromiseRef.current;
+    tokenPromiseRef.current = (async () => {
+      const url = `${siteBase.replace(/\/$/, "")}/realtime/token`;
+      const res = await fetch(url, { method: "GET" });
+      if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`);
+      const data = await res.json();
+      if (!data?.value) throw new Error("Invalid token response");
+      return data.value as string;
+    })();
+    try {
+      const v = await tokenPromiseRef.current;
+      return v;
+    } finally {
+      tokenPromiseRef.current = null;
+    }
   }, []);
 
   // Configure the realtime session (declared after helpers to avoid TDZ)
   let configureSession = (async () => {}) as unknown as () => Promise<void>;
 
-  // Build multi-section tutor instructions
-  const buildTutorInstructions = useCallback(() => {
-    return [
-      '# Studi Tutor — Operating Rules',
-      '',
-      '## Role & Objective',
-      '- You are a friendly, concise human tutor on an infinite whiteboard. Teach, explain, and clarify while keeping the board tidy.',
-      '',
-      '## Style & Verbosity',
-      '- Voice output: 2–3 short sentences per turn; brisk but not rushed.',
-      '- Use plain language. Only brief tool preambles. Avoid rambling.',
-      '- Speak English only. Do not switch languages. If asked to switch, politely decline and continue in English.',
-      '',
-      '## Auto Context (use first)',
-      '- Before most responses you will receive: (1) a compact JSON block named "view_context" (viewport bounds + summarized shapes) and (2) a screenshot of the current viewport.',
-      '- Treat these as your primary context. Call extra tools only if you truly need more or to change the canvas.',
-      '',
-      '## Agentic Eagerness & Persistence',
-      '- Default reasoning effort: low-to-medium. Prefer quick, correct action over overthinking.',
-      '- Context gathering budget per turn: usually ≤ 2 tool calls. Escalate beyond this only if needed for correctness.',
-      '- You are an agent: keep going until the user\'s request is fully resolved. Do not hand back at uncertainty—make the most reasonable assumption, act, and note it.',
-      '',
-      '## Tool Preambles (concise)',
-      '- Rephrase the user\'s goal in one short sentence, then outline a 1–3 step plan.',
-      '- Before each tool call say one short line (e.g., “Let me align these.”). Keep status updates minimal.',
-      '- After a sequence of tools, give a one-line summary of what changed.',
-      '',
-      '## Whiteboard Reading & Layout',
-      '- For pen-drawn math/text, reason over the provided screenshot. If needed, zoom with agent_set_view, then optionally call agent_get_text_context (for visible text shapes only).',
-      '- Prefer layout tools (agent_align, agent_distribute, agent_stack, agent_place) over guessing coordinates.',
-      '- Use z-order tools only when overlapping matters.',
-      '- For drawing tasks (e.g., “draw a cat” or “make a simple math problem”), do not ask clarifying questions; choose sensible defaults and draw immediately. Use ellipses/triangles/rectangles, default sizes (~120×90), and place near the current viewport center.',
-      '',
-      '## Action Safety & Verification',
-      '- Perform small, atomic steps. After create/move/update, verify the result (e.g., shape exists; position change within tolerance). If verification fails, fix or roll back with a minimal correction.',
-      '- Ask for explicit confirmation before destructive actions (e.g., clearing the canvas).',
-      '',
-      '## Drawing Guidance',
-      '- Compose complex objects from multiple shapes. Prefer tint/background fills over large solid-black areas; choose contrasting strokes for clarity.',
-      '',
-      '## Markdown (when applicable)',
-      '- Use Markdown only when semantically helpful (bullets, short code fences, inline math). Keep it minimal in voice responses.',
-    ].join('\n');
-  }, []);
+  // buildTutorInstructions is imported from lib/realtimeInstructions
 
   // Send compact auto-context (viewport + shapes + image)
   const sendAutoContext = useCallback(async (triggerResponse: boolean = false) => {
-    const session = sessionRef.current;
-    const transport = session?.transport;
-    if (!transport) return 'no-session';
-    try {
-      const ctx = getViewContext();
-      const compact = {
-        type: 'view_context',
-        bounds: ctx.bounds,
-        blurryShapes: Array.isArray(ctx.blurryShapes) ? ctx.blurryShapes.slice(0, 60) : [],
-        peripheralClusters: Array.isArray(ctx.peripheralClusters) ? ctx.peripheralClusters.slice(0, 32) : [],
-        selectedShapes: Array.isArray(ctx.selectedShapes) ? ctx.selectedShapes.slice(0, 20) : [],
-      };
-      const text = JSON.stringify(compact);
-      appendLog(`[transport] conversation.item.create (auto-context text ${text.length} chars)`);
-      transport.sendEvent({
-        type: 'conversation.item.create',
-        item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
-      });
-      const url = await getScreenshot();
-      if (url && url !== 'null') {
-        appendLog(`[transport] conversation.item.create (auto-context image length=${url.length})`);
-        transport.sendEvent({
-          type: 'conversation.item.create',
-          item: { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: url }] },
-        });
-      }
-      setDebugContext({ text, imageUrl: url ?? null, ts: Date.now() });
-      if (triggerResponse) {
-        appendLog('[transport] response.create (after auto-context)');
-        transport.sendEvent({ type: 'response.create' });
-      }
-      return 'ok';
-    } catch (e: any) {
-      appendLog(`auto-context error: ${String(e?.message ?? e)}`);
-      return 'error';
+    // Prefer combined (JSON + image in one item); fallback to legacy on failure
+    const res = await sendAutoContextCombined(editorRef, agentRef, sessionRef, appendLog, setDebugContext, triggerResponse);
+    if (res === 'error' || res === 'no-session') {
+      return await sendAutoContextService(editorRef, agentRef, sessionRef, appendLog, setDebugContext, triggerResponse);
     }
-  }, [appendLog, getViewContext, getScreenshot]);
+    return res;
+  }, [appendLog]);
 
   // Now that helpers exist, define configureSession
   configureSession = useCallback(async () => {
@@ -505,11 +343,12 @@ export default function TestAppPage() {
           audio: {
             input: {
               format: { type: 'audio/pcm', rate: 24000 },
-              turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: true, interrupt_response: true },
+              // Disable auto responses from VAD; we will trigger response.create explicitly
+              turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: false, interrupt_response: false },
             },
             output: { format: { type: 'audio/pcm' }, voice: 'marin' },
           },
-          instructions: buildTutorInstructions(),
+          instructions: buildPersonaInstructions('default'),
         },
       } as any);
       try { await sendAutoContext(false); } catch {}
@@ -518,30 +357,7 @@ export default function TestAppPage() {
     }
   }, [appendLog, buildTutorInstructions, sendAutoContext]);
 
-  const addPython = useCallback(() => {
-    const id = `python-${Date.now()}`;
-    setWindows((prev) => [
-      ...prev,
-      {
-        id,
-        title: "Python: Scratchpad",
-        x: 40,
-        y: 40,
-        w: 640,
-        h: 420,
-        code: "print('Hello from Pyodide!')",
-        outputs: [],
-      },
-    ]);
-  }, []);
-
-  const updateWin = useCallback((id: string, next: Partial<PythonWindowState>) => {
-    setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, ...next } : w)));
-  }, []);
-
-  const removeWin = useCallback((id: string) => {
-    setWindows((prev) => prev.filter((w) => w.id !== id));
-  }, []);
+  // Removed floating Python windows in favor of full-page IDE
 
   // Whiteboard helpers (simple structured ops)
   const addBox = useCallback((x: number, y: number) => {
@@ -559,7 +375,7 @@ export default function TestAppPage() {
         type: "geo",
         x,
         y,
-        props: { w: 240, h: 80, geo: "rectangle", text: text ?? "" },
+        props: { w: 240, h: 80, geo: "rectangle", label: text ?? "" },
       } as any);
       appendLog(`add_text "${text}" as geo at (${x}, ${y})`);
     } catch (e) {
@@ -575,555 +391,97 @@ export default function TestAppPage() {
     try {
       const token = await fetchEphemeralToken();
       const mod = await import("@openai/agents/realtime");
-      const zmod = await import("zod");
-      const { RealtimeAgent, RealtimeSession, tool, OpenAIRealtimeWebRTC } = mod as any;
-      const { z } = zmod as any;
+      const { tool } = mod as any;
 
-      // Tool logging helpers
-      const safeToolJson = (v: any, limit = 600) => {
-        try {
-          const s = JSON.stringify(v);
-          return s.length > limit ? s.slice(0, limit) + "…" : s;
-        } catch {
-          return "[unserializable]";
-        }
-      };
-      const wrapExecute = (
-        name: string,
-        fn: (args: any, details?: any) => Promise<any> | any,
-      ) => async (args: any, details?: any) => {
-        const rid = Math.random().toString(36).slice(2, 8);
-        const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-         appendLog(`[tool:start] ${name} rid=${rid} args=${safeToolJson(args)}`);
-        try { setToolEvents((prev: Array<ToolEvent>) => [{ ts: Date.now(), rid, name, status: 'start' as const, args }, ...prev].slice(0, 100)); } catch {}
-        try {
-           const res = await fn(args, details);
-          const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-          const ms = Math.round(t1 - t0);
-           appendLog(`[tool:done] ${name} rid=${rid} ${ms}ms result=${typeof res === 'string' ? res : safeToolJson(res)}`);
-          try { setToolEvents((prev: Array<ToolEvent>) => [{ ts: Date.now(), rid, name, status: 'done' as const, result: res, ms }, ...prev].slice(0, 100)); } catch {}
-          return res;
-        } catch (e: any) {
-          const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-          const ms = Math.round(t1 - t0);
-          const stack = e?.stack ? String(e.stack).slice(0, 600) : '';
-          appendLog(`[tool:error] ${name} rid=${rid} ${ms}ms err=${String(e?.message ?? e)}${stack ? ` stack=${stack}` : ''}`);
-          try { setToolEvents((prev: Array<ToolEvent>) => [{ ts: Date.now(), rid, name, status: 'error' as const, err: String(e?.message ?? e), ms }, ...prev].slice(0, 100)); } catch {}
-          throw e;
-        }
-       };
-
-      // Tools — Agent Actions
-      const agentDelete = tool({
-        name: "agent_delete",
-        description: "Delete a shape by simple id.",
-        parameters: z.object({ shapeId: z.string() }),
-        execute: wrapExecute("agent_delete", async ({ shapeId }: any) => {
-          await dispatchAction({ _type: "delete", intent: "Delete shape", shapeId });
-          return `deleted ${shapeId}`;
-        }),
-      });
-
-      const agentClear = tool({
-        name: "agent_clear",
-        description: "Clear the canvas (delete all shapes).",
-        parameters: z.object({}),
-        execute: wrapExecute("agent_clear", async () => {
-          await dispatchAction({ _type: "clear" });
-          return "cleared canvas";
-        }),
-      });
-
-      const agentCreateShape = tool({
-        name: "agent_create_shape",
-        description: "Create a geo shape (rectangle, ellipse, triangle, diamond, etc.) with optional text/color/fill.",
-        parameters: z.object({
-          geo: z.enum(["rectangle","ellipse","triangle","diamond","pentagon","hexagon","octagon","star","rhombus","parallelogram"]).default("ellipse"),
-          x: z.number(),
-          y: z.number(),
-          w: z.number().default(100),
-          h: z.number().default(100),
-          text: z.string().nullable().optional(),
-          color: z.string().default("black"),
-          fill: z.enum(["none","tint","background","solid","pattern"]).default("none"),
-        }),
-        execute: wrapExecute("agent_create_shape", async ({ geo, x, y, w, h, text, color, fill }: any) => {
-          const nx = (typeof x === 'number' && isFinite(x)) ? x : null;
-          const ny = (typeof y === 'number' && isFinite(y)) ? y : null;
-          const nw = (typeof w === 'number' && isFinite(w)) ? w : null;
-          const nh = (typeof h === 'number' && isFinite(h)) ? h : null;
-          if (nx === null || ny === null) return 'invalid position';
-          if (nw === null || nh === null) return 'invalid size';
-          await dispatchAction({
-            _type: "create",
-            intent: `Create ${geo}`,
-            shape: {
-              _type: geo,
-              shapeId: randomId(),
-              note: "",
-              x: nx,
-              y: ny,
-              w: nw,
-              h: nh,
-              text: text ?? undefined,
-              color,
-              fill,
-            },
-          });
-          return `created ${geo} at (${x},${y})`;
-        }),
-      });
-
-      // Backward-compatible alias: some prompts/models will try calling agent_create
-      const agentCreate = tool({
-        name: "agent_create",
-        description: "Create a shape (defaults to rectangle).",
-        parameters: z.object({
-          geo: z.enum(["rectangle","ellipse","triangle","diamond","pentagon","hexagon","octagon","star","rhombus","parallelogram"]).default("rectangle"),
-          x: z.number(),
-          y: z.number(),
-          w: z.number().default(120),
-          h: z.number().default(90),
-          text: z.string().nullable().optional(),
-          color: z.string().default("black"),
-          fill: z.enum(["none","tint","background","solid","pattern"]).default("none"),
-        }),
-        execute: wrapExecute("agent_create", async ({ geo, x, y, w, h, text, color, fill }: any) => {
-          const nx = (typeof x === 'number' && isFinite(x)) ? x : null;
-          const ny = (typeof y === 'number' && isFinite(y)) ? y : null;
-          const nw = (typeof w === 'number' && isFinite(w)) ? w : null;
-          const nh = (typeof h === 'number' && isFinite(h)) ? h : null;
-          if (nx === null || ny === null) return 'invalid position';
-          if (nw === null || nh === null) return 'invalid size';
-          await dispatchAction({
-            _type: "create",
-            intent: `Create ${geo}`,
-            shape: {
-              _type: geo,
-              shapeId: randomId(),
-              note: "",
-              x: nx,
-              y: ny,
-              w: nw,
-              h: nh,
-              text: text ?? undefined,
-              color,
-              fill,
-            },
-          });
-          return `created ${geo} at (${x},${y})`;
-        }),
-      });
-
-      const agentMove = tool({
-        name: "agent_move",
-        description: "Move a shape by simple id to a new position.",
-        parameters: z.object({ shapeId: z.string(), x: z.number(), y: z.number() }),
-        execute: wrapExecute("agent_move", async ({ shapeId, x, y }: any) => {
-          await dispatchAction({ _type: "move", intent: "Move shape", shapeId, x, y });
-          return `moved ${shapeId} to (${x},${y})`;
-        }),
-      });
-
-      const agentLabel = tool({
-        name: "agent_label",
-        description: "Set or change a shape's label/text.",
-        parameters: z.object({ shapeId: z.string(), text: z.string() }),
-        execute: wrapExecute("agent_label", async ({ shapeId, text }: any) => {
-          await dispatchAction({ _type: "label", intent: "Label shape", shapeId, text });
-          return `labeled ${shapeId}`;
-        }),
-      });
-
-      const agentAlign = tool({
-        name: "agent_align",
-        description: "Align shapes by ids (top, bottom, left, right, center-horizontal, center-vertical).",
-        parameters: z.object({ alignment: z.enum(["top","bottom","left","right","center-horizontal","center-vertical"]), shapeIds: z.array(z.string()), gap: z.number().default(0) }),
-        execute: wrapExecute("agent_align", async ({ alignment, shapeIds, gap }: any) => {
-          await dispatchAction({ _type: "align", intent: `Align ${shapeIds.length} shapes`, alignment, shapeIds, gap });
-          return `aligned ${shapeIds.length} shapes (${alignment})`;
-        }),
-      });
-
-      const agentDistribute = tool({
-        name: "agent_distribute",
-        description: "Distribute shapes (horizontal or vertical).",
-        parameters: z.object({ direction: z.enum(["horizontal","vertical"]), shapeIds: z.array(z.string()), gap: z.number().default(0) }),
-        execute: wrapExecute("agent_distribute", async ({ direction, shapeIds, gap }: any) => {
-          await dispatchAction({ _type: "distribute", intent: `Distribute ${shapeIds.length} shapes`, direction, shapeIds, gap });
-          return `distributed ${shapeIds.length} shapes (${direction})`;
-        }),
-      });
-
-      const agentStack = tool({
-        name: "agent_stack",
-        description: "Stack shapes (vertical or horizontal).",
-        parameters: z.object({ direction: z.enum(["vertical","horizontal"]), shapeIds: z.array(z.string()), gap: z.number().default(0.1) }),
-        execute: wrapExecute("agent_stack", async ({ direction, shapeIds, gap }: any) => {
-          await dispatchAction({ _type: "stack", intent: `Stack ${shapeIds.length} shapes`, direction, shapeIds, gap });
-          return `stacked ${shapeIds.length} shapes (${direction})`;
-        }),
-      });
-
-      const agentRotate = tool({
-        name: "agent_rotate",
-        description: "Rotate shapes around an origin by degrees.",
-        parameters: z.object({ shapeIds: z.array(z.string()), degrees: z.number(), originX: z.number(), originY: z.number() }),
-        execute: wrapExecute("agent_rotate", async ({ shapeIds, degrees, originX, originY }: any) => {
-          await dispatchAction({ _type: "rotate", intent: `Rotate ${shapeIds.length} shapes`, shapeIds, degrees, originX, originY, centerY: 0 });
-          return `rotated ${shapeIds.length} shapes by ${degrees}°`;
-        }),
-      });
-
-      const agentResize = tool({
-        name: "agent_resize",
-        description: "Resize shapes with scaleX/scaleY relative to origin.",
-        parameters: z.object({ shapeIds: z.array(z.string()), scaleX: z.number(), scaleY: z.number(), originX: z.number(), originY: z.number() }),
-        execute: wrapExecute("agent_resize", async ({ shapeIds, scaleX, scaleY, originX, originY }: any) => {
-          await dispatchAction({ _type: "resize", intent: `Resize ${shapeIds.length} shapes`, shapeIds, scaleX, scaleY, originX, originY });
-          return `resized ${shapeIds.length} shapes`;
-        }),
-      });
-
-      const agentBringToFront = tool({
-        name: "agent_bring_to_front",
-        description: "Bring shapes to front (z-order).",
-        parameters: z.object({ shapeIds: z.array(z.string()) }),
-        execute: wrapExecute("agent_bring_to_front", async ({ shapeIds }: any) => {
-          await dispatchAction({ _type: "bringToFront", intent: `Bring to front`, shapeIds });
-          return `brought ${shapeIds.length} to front`;
-        }),
-      });
-
-      const agentSendToBack = tool({
-        name: "agent_send_to_back",
-        description: "Send shapes to back (z-order).",
-        parameters: z.object({ shapeIds: z.array(z.string()) }),
-        execute: wrapExecute("agent_send_to_back", async ({ shapeIds }: any) => {
-          await dispatchAction({ _type: "sendToBack", intent: "Send to back", shapeIds });
-          return `sent ${shapeIds.length} to back`;
-        }),
-      });
-
-      const agentPlace = tool({
-        name: "agent_place",
-        description: "Place a shape relative to another (top/bottom/left/right with alignment/end/center/start).",
-        parameters: z.object({ shapeId: z.string(), referenceShapeId: z.string(), side: z.enum(["top","bottom","left","right"]), align: z.enum(["start","center","end"]), sideOffset: z.number().default(0), alignOffset: z.number().default(0) }),
-        execute: wrapExecute("agent_place", async ({ shapeId, referenceShapeId, side, align, sideOffset, alignOffset }: any) => {
-          await dispatchAction({ _type: "place", intent: "Place shape", shapeId, referenceShapeId, side, align, sideOffset, alignOffset });
-          return `placed ${shapeId} ${side} of ${referenceShapeId}`;
-        }),
-      });
-
-      const agentPen = tool({
-        name: "agent_pen",
-        description: "Draw a path with the pen (points, style, closed, color, fill).",
-        parameters: z.object({ points: z.array(z.object({ x: z.number(), y: z.number() })), style: z.enum(["smooth","straight"]).default("smooth"), closed: z.boolean().default(false), color: z.string().default("blue"), fill: z.enum(["none","tint","background","solid","pattern"]).default("none") }),
-        execute: wrapExecute("agent_pen", async ({ points, style, closed, color, fill }: any) => {
-          await dispatchAction({ _type: "pen", intent: "Draw path", points, style, closed, color, fill });
-          return `drew ${points.length} points`;
-        }),
-      });
-
-      const agentUpdate = tool({
-        name: "agent_update",
-        description: "Update a shape's properties (text, color, fill, size, position, geo).",
-        parameters: z.object({
-          shapeId: z.string(),
-          text: z.string().nullable().optional(),
-          color: z.string().nullable().optional(),
-          fill: z.enum(["none","tint","background","solid","pattern"]).nullable().optional(),
-          x: z.number().nullable().optional(),
-          y: z.number().nullable().optional(),
-          w: z.number().nullable().optional(),
-          h: z.number().nullable().optional(),
-          geo: z.enum(["rectangle","ellipse","triangle","diamond","pentagon","hexagon","octagon","star","rhombus","parallelogram"]).nullable().optional(),
-        }),
-        execute: wrapExecute("agent_update", async ({ shapeId, text, color, fill, x, y, w, h, geo }: any) => {
-          const editor = editorRef.current;
-          if (!editor) return "editor not ready";
-          const tldId = `shape:${shapeId}`;
-          const shape = editor.getShape(tldId);
-          if (!shape) return `not found ${shapeId}`;
-          const simple = convertTldrawShapeToSimpleShape(editor, shape);
-          const update: any = { ...simple, shapeId };
-          if (typeof text !== 'undefined' && text !== null) update.text = String(text);
-          if (typeof color !== 'undefined' && color !== null) update.color = String(color);
-          if (typeof fill !== 'undefined' && fill !== null) update.fill = fill as any;
-          if (typeof x === 'number') update.x = x;
-          if (typeof y === 'number') update.y = y;
-          if (typeof w === 'number') update.w = w;
-          if (typeof h === 'number') update.h = h;
-          if (typeof geo === 'string' && update._type === 'geo') update.geo = geo;
-          await dispatchAction({ _type: "update", intent: "Update shape", update });
-          return `updated ${shapeId}`;
-        }),
-      });
-
-      const agentGetTextContext = tool({
-        name: "agent_get_text_context",
-        description: "Return visible texts from shapes in the viewport for OCR-free reading.",
-        parameters: z.object({}),
-        execute: wrapExecute("agent_get_text_context", async () => {
-          const editor = editorRef.current;
-          if (!editor) return "editor not ready";
-          const viewport = editor.getViewportPageBounds();
-          const shapes = editor.getCurrentPageShapesSorted().filter((s: any) => {
-            const b = editor.getShapeMaskedPageBounds(s);
-            return b && b.collides(viewport);
-          });
-          const items = shapes.map((s: any) => {
-            const simple = convertTldrawShapeToSimpleShape(editor, s) as any;
-            const text = simple?.text ?? "";
-            const note = simple?.note ?? "";
-            return { shapeId: simple?.shapeId, type: simple?._type, text, note };
-          }).filter((i: any) => (i.text && i.text.length) || (i.note && i.note.length));
-          return JSON.stringify({ items });
-        }),
-      });
-
-      // Share current viewport screenshot into the conversation as an input_image item
-      const agentSendViewImage = tool({
-        name: "agent_send_view_image",
-        description: "Capture the current viewport as an image and attach it to the conversation.",
-        parameters: z.object({ triggerResponse: z.boolean().default(true) }),
-        execute: wrapExecute("agent_send_view_image", async ({ triggerResponse }: any) => {
-          const url = await getScreenshot();
-          if (!url || url === "null") return "no-visible-shapes";
+      // Create runtime bridges used by modular tools
+      const runtime: AgentRuntime = buildRuntime({
+        editorRef,
+        sessionRef,
+        appendLog,
+        onToolEvent: (e) => {
+          try { setToolEvents((prev: Array<ToolEvent>) => [e as any, ...prev].slice(0, 100)); } catch {}
           try {
-            const session = sessionRef.current;
-            const transport = session?.transport;
-            appendLog(`[transport] conversation.item.create (image length=${url.length})`);
-            transport?.sendEvent({
-              type: 'conversation.item.create',
-              item: {
-                type: 'message',
-                role: 'user',
-                content: [ { type: 'input_image', image_url: url } ],
-              },
-            });
-            if (triggerResponse) {
-              appendLog(`[transport] response.create`);
-              transport?.sendEvent({ type: 'response.create' });
+            if (currentTurnRef.current) {
+              currentTurnRef.current.tools = currentTurnRef.current.tools || [];
+              currentTurnRef.current.tools.push(e);
+              const id = currentTurnRef.current.id;
+              appendLog(`[turn:tool] id=${id} name=${e.name} status=${e.status}`);
             }
-            return 'image-shared';
-          } catch (e: any) {
-            return `error: ${String(e?.message ?? e)}`;
-          }
-        }),
-      });
-
-      // Return the current viewport screenshot as a data URL (fallback/non-attaching)
-      const agentCaptureViewImage = tool({
-        name: "agent_capture_view_image",
-        description: "Return a data URL JPEG of the current viewport if shapes are visible.",
-        parameters: z.object({}),
-        execute: wrapExecute("agent_capture_view_image", async () => {
-          const url = await getScreenshot();
-          return url ?? "null";
-        }),
-      });
-
-      const agentSetView = tool({
-        name: "agent_set_view",
-        description: "Move the agent's viewport to bounds.",
-        parameters: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
-        execute: wrapExecute("agent_set_view", async ({ x, y, w, h }: any) => {
-          await dispatchAction({ _type: "setMyView", intent: "Move camera", x, y, w, h });
-          return `viewport set (${x},${y},${w},${h})`;
-        }),
-      });
-
-      // Tools — Read-only context
-      const agentGetViewContext = tool({
-        name: "agent_get_view_context",
-        description: "Get viewport bounds and summarized shapes/context.",
-        parameters: z.object({}),
-        execute: wrapExecute("agent_get_view_context", async () => {
-          const ctx = getViewContext();
-          return JSON.stringify(ctx);
-        }),
-      });
-
-      const agentGetScreenshot = tool({
-        name: "agent_get_screenshot",
-        description: "Get a JPEG data URL of the current viewport if shapes are visible.",
-        parameters: z.object({}),
-        execute: wrapExecute("agent_get_screenshot", async () => {
-          const url = await getScreenshot();
-          return url ?? "null";
-        }),
-      });
-
-      // Existing Python demo tools (kept)
-      const createPythonTool = tool({
-        name: "create_python_window",
-        description: "Create a new Python editor window.",
-        parameters: z.object({ title: z.string().nullable() }),
-        execute: wrapExecute("create_python_window", async ({ title }: { title: string | null }) => {
-          setToolBusy(true);
-          addPython();
-          setToolBusy(false);
-          return `created ${title ?? "Python: Scratchpad"}`;
-        }),
-      });
-
-      const pythonSetCode = tool({
-        name: "python_set_code",
-        description: "Set code in the first Python window.",
-        parameters: z.object({ code: z.string() }),
-        execute: wrapExecute("python_set_code", async ({ code }: { code: string }) => {
-          setToolBusy(true);
-          setWindows((prev) => prev.length ? [{ ...prev[0], code }, ...prev.slice(1)] : prev);
-          setToolBusy(false);
-          return `code set (${code.length} chars)`;
-        }),
-      });
-
-      const pythonRun = tool({
-        name: "python_run",
-        description: "Run code in the first Python window.",
-        parameters: z.object({}),
-        execute: wrapExecute("python_run", async () => {
-          setToolBusy(true);
-          // Trigger run by toggling a flag or reusing logic: call runCode-like by patching code (no-op) to keep simple
-          // We'll append a small log and rely on user to click Run if needed.
-          // For demo: ensure there is a window and append a hint output.
-          setWindows((prev) => prev.length ? [
-            { ...prev[0], outputs: [...prev[0].outputs, { type: "stdout", text: "[agent] run requested", ts: Date.now() }] },
-            ...prev.slice(1)
-          ] : prev);
-          setToolBusy(false);
-          return "run requested";
-        }),
-      });
-
-      // IDE workspace tools
-      const ideCreateFile = tool({
-        name: "ide_create_file",
-        description: "Create a new file in the IDE workspace.",
-        parameters: z.object({ name: z.string(), language: z.string().default("typescript"), content: z.string().default("") }),
-        execute: wrapExecute("ide_create_file", async ({ name, language, content }: any) => {
-          setToolBusy(true);
-          createFile(name, language, content ?? "");
-          setToolBusy(false);
-          return `created ${name}`;
-        }),
-      });
-
-      const ideSetActive = tool({
-        name: "ide_set_active",
-        description: "Set the active file by name.",
-        parameters: z.object({ name: z.string() }),
-        execute: wrapExecute("ide_set_active", async ({ name }: any) => {
-          setToolBusy(true);
+          } catch {}
+        },
+        setToolBusy: (busy: boolean) => setToolBusy(busy),
+        createFile: (name: string, language: string, content: string) => { createFile(name, language, content); },
+        setActiveFileIdByName: (name: string) => {
           const f = files.find((f) => f.name === name);
           if (f) setActiveFileId(f.id);
-          setToolBusy(false);
-          return f ? `active ${name}` : `not found ${name}`;
-        }),
+          return !!f;
+        },
+        updateActiveFileContent: (content: string) => { updateActiveFileContent(String(content ?? "")); },
+        listFilesContext: () => ({ files: files.map((f) => ({ name: f.name, language: f.language, size: f.content.length })), active: activeFile?.name }),
+        getScreenshot: async () => await getScreenshot(),
+        getViewContext: () => getViewContext(),
+        dispatchAction: async (action: any) => { await dispatchAction(action); },
+        getSimpleShape: (shapeId: string) => {
+          try {
+            const editor = editorRef.current;
+            if (!editor) return null;
+            const shape = editor.getShape(`shape:${shapeId}`);
+            if (!shape) return null;
+            const rawId = String(shape?.id ?? "");
+            const simpleId = rawId.replace(/^shape:/, "");
+            const type = String(shape?.type ?? "unknown");
+            const x = typeof (shape as any)?.x === 'number' ? (shape as any).x : 0;
+            const y = typeof (shape as any)?.y === 'number' ? (shape as any).y : 0;
+            const w = typeof (shape as any)?.props?.w === 'number' ? (shape as any).props.w : (typeof (shape as any)?.w === 'number' ? (shape as any).w : 0);
+            const h = typeof (shape as any)?.props?.h === 'number' ? (shape as any).props.h : (typeof (shape as any)?.h === 'number' ? (shape as any).h : 0);
+            const text = typeof (shape as any)?.props?.label === 'string' ? (shape as any).props.label : '';
+            const geo = typeof (shape as any)?.props?.geo === 'string' ? (shape as any).props.geo : undefined;
+            return { _type: type, shapeId: simpleId, x, y, w, h, text, geo } as any;
+          } catch { return null; }
+        },
+        getVisibleTextItems: () => {
+          try {
+            const editor = editorRef.current;
+            if (!editor) return [] as any[];
+            const viewport = editor.getViewportPageBounds();
+            const shapes = editor.getCurrentPageShapesSorted().filter((s: any) => {
+              const b = editor.getShapeMaskedPageBounds(s);
+              return b && b.collides(viewport);
+            });
+            const items = shapes.map((s: any) => {
+              try {
+                const rawId = String(s?.id ?? "");
+                const shapeId = rawId.replace(/^shape:/, "");
+                const type = String(s?.type ?? "unknown");
+                const text = typeof (s as any)?.props?.label === 'string' ? (s as any).props.label : '';
+                const note = typeof (s as any)?.props?.note === 'string' ? (s as any).props.note : '';
+                return { shapeId, type, text, note };
+              } catch { return { shapeId: '', type: 'unknown', text: '', note: '' }; }
+            }).filter((i: any) => (i.text && i.text.length) || (i.note && i.note.length));
+            return items;
+          } catch { return [] as any[]; }
+        },
+        notesGetText: () => notesYaml,
+        notesSetText: (text: string) => { setNotesYaml(String(text ?? "")); },
+        notesAppend: (text: string) => {
+          try {
+            const parsed = parseNotesYaml(notesYaml);
+            if (!parsed.doc) return;
+            const next = { ...parsed.doc, blocks: [...parsed.doc.blocks, { type: 'text', md: String(text ?? '') } as any] } as NotesDocT;
+            setNotesYaml(serializeNotesYaml(next));
+          } catch {}
+        },
       });
 
-      const ideUpdateContent = tool({
-        name: "ide_update_content",
-        description: "Replace the active file's content.",
-        parameters: z.object({ content: z.string() }),
-        execute: wrapExecute("ide_update_content", async ({ content }: any) => {
-          setToolBusy(true);
-          updateActiveFileContent(String(content ?? ""));
-          setToolBusy(false);
-          return `updated content (${(content ?? "").length} chars)`;
-        }),
-      });
+      const tools = buildAllTools((def: any) => (mod as any).tool(def), runtime);
 
-      const ideGetContext = tool({
-        name: "ide_get_context",
-        description: "Get JSON of files and active file.",
-        parameters: z.object({}),
-        execute: wrapExecute("ide_get_context", async () => {
-          const ctx = { files: files.map((f) => ({ name: f.name, language: f.language, size: f.content.length })), active: activeFile?.name };
-          return JSON.stringify(ctx);
-        }),
-      });
+      // Connect session via handle
+      const handle = createRealtimeSessionHandle();
+      sessionHandleRef.current = handle;
+      await handle.connect({ token, selectedInputDeviceId: selectedInputId || undefined, selectedOutputDeviceId: selectedOutputId || undefined, audioElement: audioRef.current, appendLog, tools, agentName: "Studi" });
+      sessionRef.current = handle.getSession();
+      mediaStreamRef.current = handle.getMediaStream();
 
-      // Notes tools
-      const notesSetText = tool({
-        name: "notes_set_text",
-        description: "Replace the notes markdown text.",
-        parameters: z.object({ text: z.string() }),
-        execute: wrapExecute("notes_set_text", async ({ text }: any) => {
-          setToolBusy(true);
-          setNotesText(String(text ?? ""));
-          setToolBusy(false);
-          return `notes set (${(text ?? "").length} chars)`;
-        }),
-      });
-
-      const notesAppend = tool({
-        name: "notes_append",
-        description: "Append markdown to the notes text.",
-        parameters: z.object({ text: z.string() }),
-        execute: wrapExecute("notes_append", async ({ text }: any) => {
-          setToolBusy(true);
-          setNotesText((prev) => `${prev}\n${String(text ?? "")}`);
-          setToolBusy(false);
-          return `notes appended (${(text ?? "").length} chars)`;
-        }),
-      });
-
-      const agent = new RealtimeAgent({
-        name: "Studi",
-        // Keep initial instructions minimal; the full operating rules are injected via session.update
-        instructions: "Studi is a realtime voice tutor. Speak naturally and concisely.",
-        tools: [
-          agentGetViewContext,
-          agentGetScreenshot,
-          agentSendViewImage,
-          agentCaptureViewImage,
-          agentCreateShape,
-          agentCreate,
-          agentMove,
-          agentLabel,
-          agentSetView,
-          agentDelete,
-          agentClear,
-          agentAlign,
-          agentDistribute,
-          agentStack,
-          agentRotate,
-          agentResize,
-          agentBringToFront,
-          agentSendToBack,
-          agentPlace,
-          agentPen,
-          agentUpdate,
-          agentGetTextContext,
-          ideCreateFile,
-          ideSetActive,
-          ideUpdateContent,
-          ideGetContext,
-          notesSetText,
-          notesAppend,
-          createPythonTool,
-          pythonSetCode,
-          pythonRun,
-        ],
-      });
-
-      // Explicitly configure WebRTC transport with audio element for playback
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = mediaStream;
-      // Apply current mute state to mic track(s)
-      if (muted) {
-        try { mediaStream.getAudioTracks().forEach((t) => (t.enabled = false)); } catch {}
-      }
-      try {
-        const t = mediaStream.getAudioTracks()?.[0];
-        if (t) {
-          const s = t.getSettings?.() ?? {};
-          appendLog(`mic track: ${t.label || 'unknown'} state=${t.readyState} deviceId=${(s as any).deviceId || 'n/a'}`);
-        }
-      } catch {}
       // Setup local mic level meter
       const setupAnalyser = (ms: MediaStream) => {
         try {
@@ -1186,22 +544,20 @@ export default function TestAppPage() {
           appendLog(`analyser error: ${String((e as any)?.message ?? e)}`);
         }
       };
-      setupAnalyser(mediaStream);
-      const transport = new OpenAIRealtimeWebRTC({
-        mediaStream,
-        audioElement: audioRef.current ?? document.createElement("audio"),
-      });
-
-      const session = new RealtimeSession(agent, { model: "gpt-realtime", transport, config: { inputAudioTranscription: { model: 'gpt-4o-mini-transcribe', language: 'en' } } });
-      sessionRef.current = session;
-      await session.connect({ apiKey: token });
+      if (mediaStreamRef.current) setupAnalyser(mediaStreamRef.current);
       setAgentStatus("connected");
       appendLog("Agent connected");
       // Configure session with tutor instructions and send initial auto-context
-      try { await configureSession(); sessionReadyRef.current = true; } catch (e) { appendLog(`configureSession error: ${String((e as any)?.message ?? e)}`); }
+      try { await configureSession(); } catch (e) { appendLog(`configureSession error: ${String((e as any)?.message ?? e)}`); }
       try {
         if (audioRef.current) {
           audioRef.current.muted = false;
+          try {
+            if (selectedOutputId && (audioRef.current as any).setSinkId) {
+              await (audioRef.current as any).setSinkId(selectedOutputId);
+              appendLog(`audio sink set to ${selectedOutputId}`);
+            }
+          } catch {}
           await audioRef.current.play().catch((e) => appendLog(`audio play err: ${String(e)}`));
           // Setup output analyser from audio element
           const setupOutput = async () => {
@@ -1250,13 +606,30 @@ export default function TestAppPage() {
       } catch {}
 
       // Optional history updates
-      session.on?.("history_updated", (history: any) => {
-        // No-op: could render snippets
+      sessionRef.current?.on?.("history_updated", (history: any) => {
+        try {
+          // Best-effort: find last user message with text content
+          const items = Array.isArray(history) ? history : [];
+          for (let i = items.length - 1; i >= 0; i--) {
+            const it = items[i];
+            if (it && it.type === 'message' && it.role === 'user' && Array.isArray(it.content)) {
+              const textPart = it.content.find((c: any) => c?.type === 'input_text' && typeof c?.text === 'string');
+              if (textPart && typeof textPart.text === 'string') {
+                if (currentTurnRef.current) {
+                  currentTurnRef.current.userTranscript = textPart.text;
+                  const short = textPart.text.length > 180 ? textPart.text.slice(0, 180) + '…' : textPart.text;
+                  appendLog(`[turn:user] id=${currentTurnRef.current.id} text="${short}"`);
+                }
+                break;
+              }
+            }
+          }
+        } catch {}
       });
 
       // Transport event logging and speaking indicators
       try {
-        const off = session.transport?.on?.("*", (evt: any) => {
+        const off = sessionRef.current?.transport?.on?.("*", (evt: any) => {
           if (!evt || !evt.type) return;
           appendLog(`[evt] ${evt.type}`);
           // Minimal transcript/text previews for debugging
@@ -1266,6 +639,11 @@ export default function TestAppPage() {
               if (d) {
                 appendLog(`[transcript.delta] ${d.slice(0,160)}${d.length>160?'…':''}`);
                 if (languageLock) maybeReassertLanguage(d);
+                try {
+                  if (currentTurnRef.current) {
+                    currentTurnRef.current.assistantTranscript = (currentTurnRef.current.assistantTranscript || '') + d;
+                  }
+                } catch {}
               }
             }
             if (evt.type === 'response.output_text.delta') {
@@ -1284,16 +662,37 @@ export default function TestAppPage() {
             if (!waitingResponseRef.current) {
               waitingResponseRef.current = true;
               appendLog('[transport] auto-context + response.create (on speech_stopped)');
-              try { if (sessionReadyRef.current) sendAutoContext(true); } catch {}
+              try {
+                // Start a new turn log
+                currentTurnRef.current = { id: randomId(), startedAt: Date.now(), userTranscript: '', assistantTranscript: '', tools: [], contextChars: 0, imageLen: 0 };
+                appendLog(`[turn:start] id=${currentTurnRef.current.id}`);
+              } catch {}
+              try {
+                if (sessionReadyRef.current) {
+                  Promise.resolve(sendAutoContext(true)).catch(() => {});
+                }
+              } catch {}
             }
           }
           if (evt.type === "response.output_audio.delta") setAgentSpeaking(true);
           if (evt.type === "response.output_audio.done" || evt.type === "response.done") {
             setAgentSpeaking(false);
             waitingResponseRef.current = false;
+            try {
+              if (currentTurnRef.current) {
+                const id = currentTurnRef.current.id;
+                const a = String(currentTurnRef.current.assistantTranscript || '');
+                const aShort = a.length > 220 ? a.slice(0, 220) + '…' : a;
+                const toolsCount = Array.isArray(currentTurnRef.current.tools) ? currentTurnRef.current.tools.length : 0;
+                appendLog(`[turn:end] id=${id} tools=${toolsCount} assistant="${aShort}"`);
+                try { sessionTurnsRef.current.push({ ...currentTurnRef.current, endedAt: Date.now() }); } catch {}
+                currentTurnRef.current = null;
+              }
+            } catch {}
           }
-          if (evt.type === "session.created" || evt.type === "session.updated") {
-            // marker to quickly spot session lifecycle
+          if (evt.type === "session.updated") {
+            // Set readiness only after server ack of session.update
+            sessionReadyRef.current = true;
           }
         });
         unsubTransportRef.current = typeof off === "function" ? off : null;
@@ -1302,14 +701,15 @@ export default function TestAppPage() {
       setAgentStatus("disconnected");
       appendLog(`Agent error: ${String(e?.message ?? e)}`);
     }
-  }, [agentStatus, fetchEphemeralToken, appendLog, addPython, setWindows, addBox, addText, muted]);
+  }, [agentStatus, fetchEphemeralToken, appendLog, addBox, addText, muted]);
 
   const stopAgent = useCallback(async () => {
     if (agentStatus !== "connected") return;
     try {
-      await sessionRef.current?.disconnect?.();
+      await sessionHandleRef.current?.disconnect?.();
     } catch {}
     sessionRef.current = null;
+    sessionHandleRef.current = null;
     setAgentStatus("disconnected");
     appendLog("Agent disconnected");
     setAgentSpeaking(false);
@@ -1387,89 +787,148 @@ export default function TestAppPage() {
         </div>
         {(() => {
           if (editorRef.current && !agentRef.current) {
-            try { agentRef.current = new TldrawAgent({ editor: editorRef.current, id: "voice-agent", onError: (e: any) => appendLog(`agent error: ${String(e?.message ?? e)}`) }); } catch {}
+            try {
+              // Minimal shim for agentRef to satisfy dispatchAction calls
+              agentRef.current = {
+                act: ({ _type, ...rest }: any) => {
+                  const editor = editorRef.current;
+                  const result = { diff: {}, promise: Promise.resolve() } as any;
+                  try {
+                    if (!editor) return result;
+                    if (_type === 'create') {
+                      const shapePayload: any = { type: 'geo', x: rest.shape?.x ?? 0, y: rest.shape?.y ?? 0, props: { w: rest.shape?.w ?? 100, h: rest.shape?.h ?? 80, geo: rest.shape?._type ?? 'rectangle' } };
+                      // Only set label if schema supports it; to be safe, skip inline text for geo
+                      // shapePayload.props.label = rest.shape?.text ?? '';
+                      try { console.log('[tldraw:createShape]', shapePayload); } catch {}
+                      editor.createShape(shapePayload as any);
+                    } else if (_type === 'delete') {
+                      if (rest.shapeId) editor.deleteShape?.(`shape:${rest.shapeId}`);
+                    } else if (_type === 'move') {
+                      if (rest.shapeId) editor.updateShapes?.([{ id: `shape:${rest.shapeId}`, type: 'geo', x: rest.x, y: rest.y }] as any);
+                    } else if (_type === 'label') {
+                      // For v4.0.2, inline text on geo may be invalid; skip or switch to a dedicated text shape
+                      try { console.warn('[tldraw:label] geo text not supported, skipping label change', { shapeId: rest.shapeId, text: rest.text }); } catch {}
+                    } else if (_type === 'clear') {
+                      const ids = editor.getCurrentPageShapeIds();
+                      editor.deleteShapes?.(ids as any);
+                    } else if (_type === 'setMyView') {
+                      editor.zoomToBounds?.({ x: rest.x, y: rest.y, w: rest.w, h: rest.h });
+                    }
+                  } catch {}
+                  return { diff: {}, promise: Promise.resolve() };
+                },
+              };
+            } catch {}
           }
           return null;
         })()}
-            {/* Python windows overlay retained */}
-        <div className="absolute inset-0 pointer-events-none" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-          {windows.map((win) => (
-            <div key={win.id} className="pointer-events-auto">
-              <PythonWindow
-                win={win}
-                onChange={(next) => updateWin(win.id, next)}
-                onClose={() => removeWin(win.id)}
-              />
-            </div>
-          ))}
-        </div>
           </div>
         )}
 
         {/* Code IDE tab */}
         {activeTab === "code" && (
-          <div className="absolute inset-0 grid" style={{ gridTemplateColumns: '240px 1fr' }}>
-            <aside className="border-r bg-white/50 dark:bg-slate-900/40 backdrop-blur p-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium">Workspace</div>
-                <button className="text-xs px-2 py-1 rounded border" onClick={() => createFile(`file-${files.length + 1}.ts`, 'typescript', '// New file\n')}>New</button>
+          <div className="absolute inset-0 flex flex-col">
+            {/* Toolbar */}
+            <div className="h-12 px-3 md:px-4 shrink-0 border-b border-white/20 dark:border-white/10 bg-gradient-to-r from-slate-900/80 via-slate-900/70 to-slate-900/80 text-slate-200 flex items-center justify-between" role="toolbar" aria-label="IDE controls">
+              <div className="flex items-center gap-2 min-w-0">
+                <label htmlFor="language-select" className="sr-only">Language</label>
+                <select
+                  id="language-select"
+                  aria-label="Select language"
+                  className="text-xs px-2 py-1 rounded-md border border-white/10 bg-slate-800 text-slate-100 focus:outline-none"
+                  value={(activeFile?.language ?? 'python')}
+                  onChange={(e) => {
+                    const nextLang = e.target.value;
+                    setFiles((prev) => prev.map((f) => (f.id === activeFileId ? { ...f, language: nextLang } : f)));
+                  }}
+                >
+                  {languageOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
-              <ul className="space-y-1">
-                {files.map((f) => (
-                  <li key={f.id}>
-                    <button
-                      className={`w-full text-left text-xs px-2 py-1 rounded ${activeFileId === f.id ? 'bg-slate-200 dark:bg-slate-800' : 'hover:bg-slate-100 dark:hover:bg-slate-800/60'}`}
-                      onClick={() => setActiveFileId(f.id)}
-                    >
-                      {f.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-3">
-                <button className="text-xs px-2 py-1 rounded border w-full" onClick={() => addPython()}>+ Python Window</button>
+              <div className="flex items-center gap-2">
+                <button
+                  className={`text-xs px-3 py-1.5 rounded-md border border-emerald-400/30 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white transition ${ideRunning ? 'opacity-70 cursor-not-allowed' : ''}`}
+                  onClick={runActiveFile}
+                  disabled={ideRunning}
+                  aria-busy={ideRunning}
+                  aria-label="Run program"
+                >
+                  {ideRunning ? 'Running…' : 'Run ▶'}
+                </button>
+                <button
+                  className="text-xs px-3 py-1.5 rounded-md border border-white/10 bg-slate-800 hover:bg-slate-700 text-slate-100 transition"
+                  onClick={() => setShowConsole((v) => !v)}
+                  aria-pressed={showConsole}
+                  aria-label={showConsole ? 'Hide output panel' : 'Show output panel'}
+                >
+                  {showConsole ? 'Hide Output' : 'Show Output'}
+                </button>
               </div>
-            </aside>
-            <div className="relative">
-              <div className="h-9 border-b bg-white/50 dark:bg-slate-900/40 backdrop-blur flex items-center gap-2 px-3">
-                <div className="text-xs text-slate-700 dark:text-slate-200 truncate">{activeFile?.name ?? 'untitled'}</div>
-                <div className="ml-auto flex items-center gap-2">
-                  <button className="text-xs px-2 py-1 rounded border" onClick={() => {
-                    // Open current content into a Python window (best effort)
-                    setWindows((prev) => [
-                      ...prev,
-                      { id: `python-${Date.now()}`, title: `Python: ${activeFile?.name ?? 'Scratchpad'}`, x: 40, y: 40, w: 640, h: 420, code: activeFile?.content ?? '', outputs: [] },
-                    ]);
-                  }}>Run in Python</button>
-                </div>
-              </div>
-              <div className="absolute inset-0 top-9">
+            </div>
+
+            {/* Editor + Output area */}
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 min-h-0">
                 <MonacoEditor
+                  key={activeFile?.language}
                   theme="vs-dark"
+                  language={activeFile?.language ?? 'typescript'}
                   defaultLanguage={activeFile?.language ?? 'typescript'}
                   value={activeFile?.content ?? ''}
                   onChange={(v) => updateActiveFileContent(v ?? '')}
-                  options={{ fontSize: 14, minimap: { enabled: false } }}
+                  options={{ fontSize: 14, minimap: { enabled: false }, automaticLayout: true, wordWrap: 'on' }}
                 />
               </div>
+
+              {showConsole && (
+                <div className="h-[26vh] border-t border-white/10 bg-slate-900/80 text-slate-100">
+                  <div className="h-9 px-3 border-b border-white/10 flex items-center justify-between">
+                    <div className="text-[11px] font-medium">Output</div>
+                    <div className="flex items-center gap-2">
+                      <button className="text-[11px] px-2 py-1 rounded border border-white/10 bg-slate-800 hover:bg-slate-700" onClick={clearConsole}>Clear</button>
+                    </div>
+                  </div>
+                  <div className="p-2 h-[calc(26vh-2.25rem)] overflow-auto text-xs">
+                    {ideOutputs.length === 0 ? (
+                      <div className="text-slate-400">No output yet. Use Run ▶ to execute your Python file.</div>
+                    ) : (
+                      <ul className="space-y-1">
+                        {ideOutputs.map((o, i) => (
+                          <li key={i} className={o.type === 'stderr' ? 'text-red-400' : o.type === 'info' ? 'text-cyan-300' : 'text-slate-100'}>
+                            <span className="text-[10px] text-slate-500 mr-2">{new Date(o.ts).toLocaleTimeString()}</span>
+                            <span>{o.text}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {/* Notes tab */}
         {activeTab === "notes" && (
-          <div className="absolute inset-0 grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-            <div className="p-4 bg-white/60 dark:bg-slate-900/40 backdrop-blur">
-              <div className="text-sm font-medium mb-2">Markdown</div>
-              <textarea
-                className="w-full h-[calc(100%-1.75rem)] resize-none rounded border bg-white/70 dark:bg-slate-900/50 p-3 text-sm"
-                value={notesText}
-                onChange={(e) => setNotesText(e.target.value)}
-              />
-            </div>
-            <div className="p-4 border-l bg-white/30 dark:bg-slate-900/30 backdrop-blur overflow-auto">
-              <div className="text-sm font-medium mb-2">Preview</div>
-              <pre className="whitespace-pre-wrap text-sm">{notesText}</pre>
+          <div className="absolute inset-0 grid" style={{ gridTemplateColumns: showYaml ? '1fr 1fr' : '1fr' }}>
+            {showYaml && (
+              <div className="p-4 bg-white/60 dark:bg-slate-900/40 backdrop-blur overflow-auto">
+                <NotesEditor value={notesYaml} onChange={setNotesYaml} />
+              </div>
+            )}
+            <div className={showYaml ? "p-4 border-l bg-white/30 dark:bg-slate-900/30 backdrop-blur overflow-auto" : "p-4 bg-white/30 dark:bg-slate-900/30 backdrop-blur overflow-auto"}>
+              <div className="h-10 flex items-center justify-between mb-2">
+                <div className="text-sm font-medium">Lesson</div>
+                <button
+                  className="text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 hover:bg-white/40 dark:hover:bg-slate-800/60"
+                  onClick={() => setShowYaml((v) => !v)}
+                >{showYaml ? 'Hide YAML' : 'Show YAML'}</button>
+              </div>
+              <div className="w-full grid place-items-center">
+                <NotesRenderer yaml={notesYaml} />
+              </div>
             </div>
           </div>
         )}
@@ -1477,70 +936,55 @@ export default function TestAppPage() {
 
       {/* Bottom-left: Tab switcher */}
       <div className="fixed left-4 bottom-4 z-40">
-        <div className="bg-white/70 dark:bg-slate-900/70 backdrop-blur shadow-lg rounded-full p-1 flex gap-1 border">
-          <button className={`px-3 py-1.5 text-xs rounded-full ${activeTab==='whiteboard' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`} onClick={() => setActiveTab('whiteboard')}>Whiteboard</button>
-          <button className={`px-3 py-1.5 text-xs rounded-full ${activeTab==='code' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`} onClick={() => setActiveTab('code')}>Code</button>
-          <button className={`px-3 py-1.5 text-xs rounded-full ${activeTab==='notes' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`} onClick={() => setActiveTab('notes')}>Notes</button>
+        <div className="rounded-full p-1 flex gap-1 border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-900/30 backdrop-blur-xl shadow-2xl">
+          <button className={`px-3 py-1.5 text-xs rounded-full transition ${activeTab==='whiteboard' ? 'bg-gradient-to-r from-fuchsia-500/80 to-pink-500/80 text-white' : 'hover:bg-white/40 dark:hover:bg-slate-800/60 text-slate-900 dark:text-slate-100'}`} onClick={() => setActiveTab('whiteboard')}>Whiteboard</button>
+          <button className={`px-3 py-1.5 text-xs rounded-full transition ${activeTab==='code' ? 'bg-gradient-to-r from-emerald-500/80 to-cyan-500/80 text-white' : 'hover:bg-white/40 dark:hover:bg-slate-800/60 text-slate-900 dark:text-slate-100'}`} onClick={() => setActiveTab('code')}>Code</button>
+          <button className={`px-3 py-1.5 text-xs rounded-full transition ${activeTab==='notes' ? 'bg-gradient-to-r from-violet-500/80 to-indigo-500/80 text-white' : 'hover:bg-white/40 dark:hover:bg-slate-800/60 text-slate-900 dark:text-slate-100'}`} onClick={() => setActiveTab('notes')}>Notes</button>
         </div>
       </div>
 
       {/* Bottom-right: AI control dock */}
       <div className="fixed right-4 bottom-4 z-40">
-        <div className="bg-white/70 dark:bg-slate-900/70 backdrop-blur shadow-lg rounded-xl border p-3 w-[320px]">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-semibold">AI Voice Agent</div>
-            <span className={`inline-flex items-center gap-1 text-[10px] ${agentStatus === 'connected' ? 'text-emerald-600' : agentStatus === 'connecting' ? 'text-amber-600' : 'text-slate-500'}`}>
-            <span className={`inline-block w-2 h-2 rounded-full ${agentStatus === 'connected' ? 'bg-emerald-500' : agentStatus === 'connecting' ? 'bg-amber-500' : 'bg-slate-400'}`} />
-            {agentStatus}
-          </span>
-        </div>
-          <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-              {agentStatus !== 'connected' ? (
-                <button className="px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs dark:bg-white dark:text-slate-900" onClick={startAgent}>Start</button>
-          ) : (
-            <>
-                  <button className="px-3 py-1.5 rounded-md border text-xs" onClick={stopAgent}>Stop</button>
-                  <button className="px-3 py-1.5 rounded-md border text-xs" onClick={toggleMute}>{muted ? 'Unmute' : 'Mute'}</button>
-            </>
-          )}
-        </div>
-            {/* Reactive speaking bubble */}
-            <div className="relative">
-              {(() => {
-                const speaking = agentSpeaking || userSpeaking;
-                const level = agentSpeaking ? Math.min(1, outputLevel * 6) : Math.min(1, inputLevel * 6);
-                const color = agentSpeaking ? 'bg-blue-500' : (userSpeaking ? 'bg-red-500' : 'bg-slate-300');
-                const size = 14 + Math.round(level * 18);
-                return (
-                  <div className="grid place-items-center">
-                    <div className={`rounded-full transition-all ${color}`} style={{ width: `${size}px`, height: `${size}px` }} />
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300">
-            <div className="flex items-center gap-2">
-          <span className={`inline-block w-2 h-2 rounded-full ${toolBusy ? 'bg-blue-500' : 'bg-slate-300'}`} />
-          {toolBusy ? 'Running tool…' : 'Idle'}
-        </div>
-        <div className="flex items-center gap-2">
-              <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setShowLogs((v) => !v)}>{showLogs ? 'Hide Logs' : 'Show Logs'}</button>
-              <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setShowContext((v) => !v)}>{showContext ? 'Hide Context' : 'Show Context'}</button>
-              <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setShowCalls((v) => !v)}>{showCalls ? 'Hide Calls' : 'Show Calls'}</button>
-              <button className="px-2 py-1 rounded border text-[11px]" onClick={addPython}>+ Py</button>
-          </div>
-        </div>
-        </div>
+        <AIVoiceAgentPanel
+          agentStatus={agentStatus}
+          startAgent={startAgent}
+          stopAgent={stopAgent}
+          muted={muted}
+          toggleMute={toggleMute}
+          toolBusy={toolBusy}
+          inputLevel={inputLevel}
+          outputLevel={outputLevel}
+          agentSpeaking={agentSpeaking}
+          userSpeaking={userSpeaking}
+          showLogs={showLogs}
+          setShowLogs={setShowLogs}
+          showContext={showContext}
+          setShowContext={setShowContext}
+          showCalls={showCalls}
+          setShowCalls={setShowCalls}
+          inputDevices={inputDevices}
+          outputDevices={outputDevices}
+          selectedInputId={selectedInputId}
+          setSelectedInputId={(id: string) => setSelectedInputId(id)}
+          selectedOutputId={selectedOutputId}
+          setSelectedOutputId={(id: string) => setSelectedOutputId(id)}
+          playTestTone={playTestTone}
+          pushToTalk={pushToTalk}
+          setPushToTalk={(v: boolean) => setPushToTalk(v)}
+          vadEagerness={vadEagerness}
+          setVadEagerness={(v: any) => applyVadEagerness(v)}
+        />
       </div>
 
       {/* Logs window (top-right) */}
       {showLogs && (
-        <div className="fixed right-4 top-4 z-40 w-80 max-h-[50vh] bg-white/80 dark:bg-slate-900/80 backdrop-blur border rounded-xl shadow-lg overflow-hidden">
-          <div className="h-9 px-3 flex items-center justify-between border-b">
-            <div className="text-sm">Logs</div>
-            <button className="text-xs px-2 py-1 rounded border" onClick={() => setShowLogs(false)}>Close</button>
+        <div className="fixed right-4 top-4 z-40 w-80 max-h-[50vh] rounded-xl border border-white/20 dark:border-white/10 bg-white/30 dark:bg-slate-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
+          <div className="h-9 px-3 flex items-center justify-between border-b border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-900/30">
+            <div className="text-sm bg-clip-text text-transparent bg-gradient-to-r from-fuchsia-500 to-pink-500">Logs</div>
+            <div className="flex items-center gap-2">
+              <button className="text-[10px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 hover:bg-white/40 dark:hover:bg-slate-800/60" onClick={() => setShowSaveLog((v) => !v)}>{showSaveLog ? 'Hide save' : 'Save'}</button>
+              <button className="text-xs px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 hover:bg-white/40 dark:hover:bg-slate-800/60" onClick={() => setShowLogs(false)}>Close</button>
+            </div>
           </div>
           <div className="p-2 h-[calc(50vh-2.25rem)] overflow-auto">
           <ul className="text-xs space-y-1">
@@ -1552,12 +996,45 @@ export default function TestAppPage() {
         </div>
       )}
 
+      {/* Save log dialog */}
+      {showSaveLog && (
+        <div className="fixed inset-0 z-50 grid place-items-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setShowSaveLog(false)} />
+          <div className="relative w-[420px] rounded-xl border border-white/20 dark:border-white/10 bg-white/40 dark:bg-slate-900/60 backdrop-blur-xl shadow-2xl p-4">
+            <div className="text-sm font-medium mb-2">Export session log</div>
+            <div className="text-xs text-slate-600 dark:text-slate-300 mb-3">Downloads a <code>log.json</code> containing turns with transcripts, context sizes, images lengths, and tool calls.</div>
+            <div className="flex items-center gap-2 justify-end">
+              <button className="text-xs px-3 py-1.5 rounded-md border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 hover:bg-white/40 dark:hover:bg-slate-800/60" onClick={() => setShowSaveLog(false)}>Cancel</button>
+              <button className="text-xs px-3 py-1.5 rounded-md text-white bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600" onClick={() => {
+                try {
+                  const payload = {
+                    ts: Date.now(),
+                    turns: sessionTurnsRef.current || [],
+                    device: { inputId: selectedInputId || 'default', outputId: selectedOutputId || 'default' },
+                    vad: { eagerness: vadEagerness, pushToTalk },
+                  };
+                  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = 'log.json';
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  URL.revokeObjectURL(url);
+                  setShowSaveLog(false);
+                } catch {}
+              }}>Download log.json</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Context window (top-left) */}
       {showContext && (
-        <div className="fixed left-4 top-4 z-40 w-[420px] max-h-[60vh] bg-white/90 dark:bg-slate-900/90 backdrop-blur border rounded-xl shadow-lg overflow-hidden">
-          <div className="h-9 px-3 flex items-center justify-between border-b">
-            <div className="text-sm">Auto Context</div>
-            <button className="text-xs px-2 py-1 rounded border" onClick={() => setShowContext(false)}>Close</button>
+        <div className="fixed left-4 top-4 z-40 w-[420px] max-h-[60vh] rounded-xl border border-white/20 dark:border-white/10 bg-white/30 dark:bg-slate-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
+          <div className="h-9 px-3 flex items-center justify-between border-b border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-900/30">
+            <div className="text-sm bg-clip-text text-transparent bg-gradient-to-r from-violet-500 to-indigo-500">Auto Context</div>
+            <button className="text-xs px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 hover:bg-white/40 dark:hover:bg-slate-800/60" onClick={() => setShowContext(false)}>Close</button>
           </div>
           <div className="p-3 space-y-2 text-xs overflow-auto" style={{ maxHeight: 'calc(60vh - 2.25rem)' }}>
             <div className="text-[11px] text-slate-500">Last sent: {debugContext ? new Date(debugContext.ts).toLocaleTimeString() : '—'}</div>
@@ -1579,10 +1056,10 @@ export default function TestAppPage() {
 
       {/* Tool calls window (bottom-left) */}
       {showCalls && (
-        <div className="fixed left-4 bottom-24 z-40 w-[420px] max-h-[40vh] bg-white/90 dark:bg-slate-900/90 backdrop-blur border rounded-xl shadow-lg overflow-hidden">
-          <div className="h-9 px-3 flex items-center justify-between border-b">
-            <div className="text-sm">Tool Calls</div>
-            <button className="text-xs px-2 py-1 rounded border" onClick={() => setShowCalls(false)}>Close</button>
+        <div className="fixed left-4 bottom-24 z-40 w-[420px] max-h-[40vh] rounded-xl border border-white/20 dark:border-white/10 bg-white/30 dark:bg-slate-900/40 backdrop-blur-xl shadow-2xl overflow-hidden">
+          <div className="h-9 px-3 flex items-center justify-between border-b border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-900/30">
+            <div className="text-sm bg-clip-text text-transparent bg-gradient-to-r from-emerald-500 to-cyan-500">Tool Calls</div>
+            <button className="text-xs px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 hover:bg-white/40 dark:hover:bg-slate-800/60" onClick={() => setShowCalls(false)}>Close</button>
           </div>
           <div className="p-2 h-[calc(40vh-2.25rem)] overflow-auto">
             <ul className="text-xs space-y-1">
@@ -1605,5 +1082,6 @@ export default function TestAppPage() {
     </main>
   );
 }
+
 
 

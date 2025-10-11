@@ -1,0 +1,43 @@
+---
+description: Core UX Principles to guide user-centered and consistent design.
+ruleType: alwaysApply
+---
+
+# Core UX Principles
+
+## User-Centered Design
+- Prioritize understanding user goals, emotions, and context.
+- Ensure products meet real user needs and expectations.
+
+## Accessibility
+- Design inclusive interfaces for all users, including disabilities.
+- Apply accessibility standards for color, text, keyboard navigation.
+
+## Consistency
+- Maintain consistent visuals, controls, and interactions.
+- Use design systems or style guides for UI components.
+
+## Types of Design Consistency
+- Visual: uniform colors, typography, spacing, and layout.
+- Functional: elements behave consistently across the interface.
+- Internal: product parts work consistently across platforms.
+- External: coherence across brand products or ecosystem.
+
+## Best Practices for UI Consistency
+- Use component libraries for reusable UI elements.
+- Conduct regular user testing to validate consistency.
+- Provide documentation for maintaining consistency.
+
+## Practical UX Design Tips
+- Define clear user goals for design decisions.
+- Use familiar UI patterns to meet user expectations.
+- Establish visual hierarchy to prioritize elements.
+- Maintain consistent content and terminology.
+- Provide clear communication for user actions and feedback.
+- Design for simplicity, clarity, and appropriate defaults.
+- Conduct ongoing usability testing and iteration.
+
+## Communication and Feedback
+- Provide immediate visual feedback on user actions.
+- Use user-friendly error messages and instructions.
+- Ensure navigation and controls are predictable and easy to use.

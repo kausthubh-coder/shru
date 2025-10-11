@@ -1,0 +1,42 @@
+Project: Realtime AI Tutor (Next.js + Convex + OpenAI Realtime)
+
+Current status
+- Prototype runs at `app/test-app/page.tsx` with three spaces: Whiteboard, Code IDE, Notes
+- Realtime voice tutor using OpenAI Realtime over WebRTC; tools operate whiteboard/IDE/notes
+- IDE runs Python in-browser via Pyodide; Judge0 integration is planned
+- Notes system is YAML‑first with interactive blocks (text, quiz, input, embed) rendered in the Notes tab
+
+Key references
+- UI: `app/test-app/page.tsx`, `app/test-app/components/AIVoiceAgentPanel.tsx`
+- Agent tools: `app/test-app/agent/tools/{whiteboard,ide,notes}.ts`, `app/test-app/agent/registry.ts`
+- Tool contracts/runtime: `app/test-app/types/toolContracts.ts`
+- Auto-context: helpers `app/test-app/lib/viewContext.ts`; combined sender `app/test-app/services/context/index.ts` (dedup + debounce), legacy fallback `app/test-app/services/autoContext.ts`
+- Tutor prompt: `app/test-app/prompts/tutor.ts` (persona variants). Legacy: `app/test-app/lib/realtimeInstructions.ts`.
+- Server: Convex `/realtime/token` in `convex/http.ts` → `convex/realtime.ts`
+
+What we are building (finished product)
+- A performant, natural voice tutor that can teach on a shared whiteboard, run code securely via Judge0, and author rich lessons
+- Notes with markdown + custom blocks (quizzes, inputs, code cells, custom UI widgets) rendered interactively
+- Robust auto-context (compact JSON + image) with throttling/dedup, plus telemetry and guardrails
+- Production features: auth-gated token endpoint, sessions with resumable context, billing, and waitlist
+
+Near-term tasks
+1) Voice agent quality and lifecycle
+   - Optimize VAD/response gating; debounce `response.create`; re-assert prompt on drift
+   - Cap/skip duplicate auto-context; JPEG sizing; tool call budget and concise preambles
+   - Standardize tool return envelopes and logs (done); add telemetry for tool calls
+2) IDE execution via Judge0
+   - Add submit/poll service; support multiple languages; surface output/errors; persist runs
+   - Expose agent tools to create files, set active, update content, and run via Judge0
+3) Notes system (interactive)
+   - Define markdown extensions (quiz/input/codecell/custom_ui) and renderer
+   - Add agent tools to write/append/insert blocks; prompts to guide lesson authoring
+   - Persist notes and versions in Convex
+4) Dynamic prompts & UX
+   - Topic-aware prompt variants (STEM, lesson-writing, quiz-mode)
+   - Device selectors, test tone, debug drawer with Context/Calls/Logs
+5) Productionization
+   - Auth for `/realtime/token`, rate limits, audit logs
+   - Session creation/storage/resume with minimal context digests
+   - Billing and waitlist flows
+

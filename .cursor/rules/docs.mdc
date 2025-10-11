@@ -1,0 +1,72 @@
+---
+globs: docs/**/*
+alwaysApply: false
+---
+# Creating and Maintaining Documentation (Markdown)
+
+## 📝 Introduction
+Documentation is the backbone of any successful project. It helps onboard new contributors, ensures consistent practices, and provides a reliable reference point for future development. Writing and maintaining good documentation is just as important as writing good code.
+
+This guide outlines best practices for creating and maintaining Markdown (`.md`) documentation.
+
+---
+
+## 🏗️ Structuring Documentation
+- **Use a Table of Contents (TOC):** Add navigation for larger documents.
+- **Consistent Headings:** Stick to a clear hierarchy (`#`, `##`, `###`, etc.).
+- **Separation of Concerns:** Split large docs into multiple files.
+- **Naming Convention:** Use clear, lowercase, hyphenated names (e.g., `getting-started.md`).
+
+---
+
+## ✍️ Writing Best Practices
+- **Be Clear and Concise:** Avoid jargon unless necessary.
+- **Use Active Voice:** "Install the package" is better than "The package should be installed."
+- **Add Examples:** Provide code snippets or screenshots where possible.
+- **Highlight Important Notes:** Use blockquotes (`>`) for tips, warnings, or notes.
+- **Use Lists:** Break down steps with ordered or unordered lists.
+
+Example:
+```md
+## Installation
+1. Clone the repository
+2. Run `npm install`
+3. Start the app using `npm run dev`
+```
+
+---
+
+## 📑 Markdown Conventions
+- **Code Blocks:** Use triple backticks for code.
+- **Inline Code:** Wrap short commands in backticks (`like this`).
+- **Links:** Use descriptive link text instead of raw URLs.
+- **Images:** Always add alt text for accessibility.
+- **Tables:** Use tables for structured information.
+
+---
+
+## 🔄 Maintaining Documentation
+- **Keep It Updated:** Update docs alongside code changes.
+- **Version Control:** Store docs in the same repo as code.
+- **Review Regularly:** Schedule periodic audits to catch outdated info.
+- **Changelog:** Maintain a `CHANGELOG.md` for tracking updates.
+- **Contribution Guidelines:** Provide a `CONTRIBUTING.md` for collaborators.
+
+---
+
+## ✅ Checklist for Great Docs
+- [ ] Clear purpose and audience defined
+- [ ] Consistent structure and formatting
+- [ ] Examples provided where needed
+- [ ] Up-to-date with the project
+- [ ] Easy navigation and search
+- [ ] Accessible language and formatting
+
+---
+
+## 📌 Conclusion
+Good documentation evolves with your project. By following these best practices, you ensure your docs remain useful, accessible, and maintainable.
+
+> "Code tells you how, documentation tells you why."
+
+

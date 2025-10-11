@@ -33,10 +33,12 @@ Configure in the Convex Dashboard → Settings → Environment Variables:
 - `OPENAI_API_KEY` — required for `mintClientSecret`
 - `CLIENT_ORIGIN` — optional CORS allowlist for `/realtime/token`
 - `CLERK_JWT_ISSUER_DOMAIN` — optional, if enabling Clerk auth in Convex
+- `NEXT_PUBLIC_CONVEX_SITE_URL` — preferred in the Next.js app to fetch `/realtime/token` (client-side)
+- `NEXT_PUBLIC_CONVEX_URL` — optional; if set, the client derives the Site URL by replacing `convex.cloud` → `convex.site`
 
 ## Calling from the client
 
-The test page fetches the token directly from the Convex site domain:
+The test page fetches the token directly from the Convex site domain. It prefers `NEXT_PUBLIC_CONVEX_SITE_URL`, with a fallback that derives the Site URL from `NEXT_PUBLIC_CONVEX_URL` by swapping the domain.
 
 - Base URL taken from `NEXT_PUBLIC_CONVEX_SITE_URL`
 - Path: `/realtime/token`
@@ -44,8 +46,21 @@ The test page fetches the token directly from the Convex site domain:
 Example (simplified):
 
 ```ts
-const base = process.env.NEXT_PUBLIC_CONVEX_SITE_URL!;
-const res = await fetch(`${base.replace(/\/$/, "")}/realtime/token`);
+const deriveSiteFromCloud = (cloudUrl?: string) => {
+  if (!cloudUrl) return null;
+  try {
+    const u = new URL(cloudUrl);
+    const host = u.host.replace("convex.cloud", "convex.site");
+    return `${u.protocol}//${host}`;
+  } catch {
+    return null;
+  }
+};
+
+const base = process.env.NEXT_PUBLIC_CONVEX_SITE_URL
+  || deriveSiteFromCloud(process.env.NEXT_PUBLIC_CONVEX_URL!);
+if (!base) throw new Error("Convex site URL not configured");
+const res = await fetch(`${base.replace(/\/$/, '')}/realtime/token`);
 const { value } = await res.json();
 ```
 

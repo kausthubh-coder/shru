@@ -10,6 +10,22 @@ Highlights:
 - Initialization gating: the agent won’t respond until the session is configured; avoids early-turn drift.
 - Debug overlays: “Show Context” (exact JSON + image sent) and “Show Calls” (structured tool call feed) for fast debugging.
 
+## Status (Implemented vs Planned)
+
+- Implemented today
+  - Test app at `app/test-app/page.tsx` with Whiteboard, Code IDE, Notes tabs
+  - Voice agent over WebRTC with modular toolbelt (whiteboard/IDE/notes)
+  - Auto-context JSON + screenshot per turn; concise tutor instructions
+  - IDE runs Python via Pyodide (client-side); output panel; device selectors/test tone
+  - Logs, Context, and Tool Calls debug overlays
+- Planned next
+  - Judge0-based secure code execution for multiple languages (submit/poll); persistence in Convex
+  - Interactive Notes renderer with markdown extensions (quizzes/inputs/code cells/custom UI)
+  - Telemetry/guardrails for tool usage; context throttling/dedup; topic-aware prompts
+  - Production hardening: auth gate + rate limits on `/realtime/token`, session resume, billing/waitlist
+
+See the living overview in `docs/context.txt` for current status, references, and near‑term tasks.
+
 ## What’s inside
 
 - Next.js App Router UI in `app/`
