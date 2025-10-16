@@ -31,7 +31,7 @@ This page explains how the test app uses OpenAI's Realtime API to run a voice-ba
 
 ### Initialization gating
 
-- After connecting, the client injects the operating prompt via `session.update` and sets a `sessionReady` flag. Auto‑context + `response.create` won’t run until sessionReady is true.
+- After connecting, the client injects the operating prompt via `session.update` and waits for `session.updated` before allowing a first response. Auto‑context + `response.create` are triggered only after this ack.
 - You can also pass an initial session config on construction to reduce races:
 
 ```ts
@@ -48,7 +48,7 @@ const session = new RealtimeSession(agent, {
 The agent registers tools via a modular registry. Definitions live in `app/test-app/agent/tools/*` and are assembled in `app/test-app/agent/registry.ts`. Runtime bridges are built in `app/test-app/agent/runtime.ts` and shared logging wrappers live in `app/test-app/types/toolContracts.ts`.
 
 ### Destructive tool approvals
-Some tools (e.g., `agent_clear`) are flagged for approval. The tool emits an approval request via the runtime event stream (`onToolEvent`). By default calls return `approval_required` unless approved; the page can present a confirmation UI (see `app/test-app/components/ToolApprovalDialog.tsx`) and re‑dispatch.
+Some tools (e.g., `agent_clear`) are flagged for approval. The tool emits an approval request via the runtime event stream (`onToolEvent`) and returns `approval_required` unless approved; the page can present a confirmation UI (see `app/test-app/components/ToolApprovalDialog.tsx`) and re‑dispatch.
 
 Whiteboard tools (selection):
 
@@ -81,7 +81,7 @@ Before most responses, the client:
 
 - Sends a compact `view_context` JSON (bounds, blurry shapes, peripheral clusters, selected shapes)
 - Captures and sends a screenshot of the viewport when available
-- Uses a combined sender that deduplicates within a short window (skips no‑ops) and debounces before `response.create`
+- Uses a combined sender that deduplicates within a short window (skips no‑ops) and debounces ~120ms before `response.create`
 
 This enables OCR‑free reasoning about structure while using the image for visual grounding.
 

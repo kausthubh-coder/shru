@@ -40,10 +40,11 @@ See the living overview in `docs/context.txt` for current status, references, an
 See in-depth docs in `docs/`:
 
 - `docs/architecture.md` — app layers and data flow
-- `docs/realtime-agent.md` — OpenAI Realtime integration, session gating, English‑only prompt, auto‑context strategy, and debug overlays
+- `docs/realtime-agent.md` — OpenAI Realtime integration, session gating (`session.updated`), persona/English‑only prompt guard, auto‑context strategy, and debug overlays
 - `docs/convex.md` — Convex functions, schema, and HTTP routes
 - `docs/test-app.md` — how to use the prototype page
 - `docs/troubleshooting.md` — common issues and fixes
+- `docs/docs.mdc` — documentation verification checklist (code → doc mapping)
 
 ## Quick start
 

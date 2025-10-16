@@ -19,6 +19,7 @@ This app uses Convex for storage, queries/mutations, HTTP endpoints, and actions
   - `OPTIONS /realtime/token` — preflight with CORS
   - `GET /realtime/token` — returns `{ value: string }` ephemeral secret
     - Internally calls `internal.realtime.mintClientSecret`
+    - Default session params used by the action: `model: "gpt-realtime"`, `voice: "marin"`
     - Optional auth gate: uncomment identity checks if you want to require a signed-in user
 
 - `convex/realtime.ts`

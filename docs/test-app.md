@@ -24,7 +24,7 @@ The prototype centers on `app/test-app/page.tsx` with extracted components and m
 - Start/Stop/Mute the agent from the dock (bottom-right)
 - Open logs (top-right) to see events
 - Tool logs print as `[tool:start|done|error]` along with a request id (rid) and elapsed time. Action mapping logs print `[act:start|map|done|error]` and the final `editor.createShape` payload.
-- Use “Show Context” to inspect the exact JSON `view_context` and the viewport screenshot sent to the model (helpers in `lib/viewContext.ts`, sender in `services/autoContext.ts`)
+- Use “Show Context” to inspect the exact JSON `view_context` and the viewport screenshot sent to the model (helpers in `lib/viewContext.ts`, sender prefers `services/context/index.ts` with a fallback to `services/autoContext.ts`)
 - In the Notes tab, paste a sample YAML (see `docs/notes.md`) and click Apply to render. Use “Hide YAML” to focus on the lesson view.
 - Use “Show Calls” to see every tool call with name, rid, timing, and errors
 - In the Code tab, pick a language from the dropdown and press Run. Output appears in the Output panel below the editor. Currently Run supports Python only.
@@ -38,7 +38,7 @@ The page periodically sends:
 - `view_context` — a compact JSON summary of visible shapes and selections
 - `input_image` — a viewport-bounded screenshot as a data URL
 
-- Combined sender: both parts are typically posted together in a single message with basic deduplication and a short debounce before triggering `response.create`.
+- Combined sender: both parts are typically posted together in a single message with basic deduplication and a short debounce (~120ms) before triggering `response.create`.
 - Implementation specifics (current):
   - Debounce before `response.create`: ~120ms to ensure the data channel delivers context first.
   - Dedup window: ~300ms to skip resending when both JSON and image are unchanged.

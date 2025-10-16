@@ -38,15 +38,9 @@ const app = express();
 app.use(express.text({ type: ["application/sdp", "text/plain"] }));
 
 const sessionConfig = JSON.stringify({
-    session: {
-        type: "realtime",
-        model: "gpt-realtime",
-        audio: {
-            output: {
-                voice: "marin",
-            },
-        },
-    },
+    type: "realtime",
+    model: "gpt-realtime",
+    audio: { output: { voice: "marin" } }
 });
 
 // An endpoint which creates a Realtime API session.

@@ -5,3 +5,9 @@
 
 
 
+
+## 2025-10-16
+
+- Docs sync (code-accurate): updated `architecture.md`, `convex.md`, `realtime-agent.md`, `ide.md`, `notes.md`, `test-app.md`, and `troubleshooting.md` to match current code.
+- Added `docs/docs.mdc` as a verification checklist (code → doc mapping).
+- README: linked the checklist and clarified realtime session gating and persona/language guard.

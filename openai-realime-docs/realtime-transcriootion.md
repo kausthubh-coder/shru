@@ -14,40 +14,55 @@ To use the Realtime API for transcription, you need to create a transcription se
 
 Unlike the regular Realtime API sessions for conversations, the transcription sessions typically don't contain responses from the model.
 
-The transcription session object is also different from regular Realtime API sessions:
+The transcription session object uses the same base session shape, but it always has a `type` of `"transcription"`:
 
 ```json
 {
-  object: "realtime.transcription_session",
-  id: string,
-  input_audio_format: string,
-  input_audio_transcription: [{
-    model: string,
-    prompt: string,
-    language: string
-  }],
-  turn_detection: {
-    type: "server_vad",
-    threshold: float,
-    prefix_padding_ms: integer,
-    silence_duration_ms: integer,
-  } | null,
-  input_audio_noise_reduction: {
-    type: "near_field" | "far_field"
+  "object": "realtime.session",
+  "type": "transcription",
+  "id": "session_abc123",
+  "audio": {
+    "input": {
+      "format": {
+        "type": "audio/pcm",
+        "rate": 24000
+      },
+      "noise_reduction": {
+        "type": "near_field"
+      },
+      "transcription": {
+        "model": "gpt-4o-transcribe",
+        "prompt": "",
+        "language": "en"
+      },
+      "turn_detection": {
+        "type": "server_vad",
+        "threshold": 0.5,
+        "prefix_padding_ms": 300,
+        "silence_duration_ms": 500
+      }
+    }
   },
-  include: list[string] | null
+  "include": [
+    "item.input_audio_transcription.logprobs"
+  ]
 }
 ```
 
-Some of the additional properties transcription sessions support are:
+### Session fields
 
-*   `input_audio_transcription.model`: The transcription model to use, currently `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, and `whisper-1` are supported
-*   `input_audio_transcription.prompt`: The prompt to use for the transcription, to guide the model (e.g. "Expect words related to technology")
-*   `input_audio_transcription.language`: The language to use for the transcription, ideally in ISO-639-1 format (e.g. "en", "fr"...) to improve accuracy and latency
-*   `input_audio_noise_reduction`: The noise reduction configuration to use for the transcription
-*   `include`: The list of properties to include in the transcription events
-
-Possible values for the input audio format are: `pcm16` (default), `g711_ulaw` and `g711_alaw`.
+*   `type`: Always `transcription` for realtime transcription sessions.
+*   `audio.input.format`: Input encoding for audio that you append to the buffer. Supported types are:
+    *   `audio/pcm` (24 kHz mono PCM; only a `rate` of `24000` is supported).
+    *   `audio/pcmu` (G.711 μ-law).
+    *   `audio/pcma` (G.711 A-law).
+*   `audio.input.noise_reduction`: Optional noise reduction that runs before VAD and turn detection. Use `{ "type": "near_field" }`, `{ "type": "far_field" }`, or `null` to disable.
+*   `audio.input.transcription`: Optional asynchronous transcription of input audio. Supply:
+    *   `model`: One of `whisper-1`, `gpt-4o-transcribe-latest`, `gpt-4o-mini-transcribe`, or `gpt-4o-transcribe`.
+    *   `language`: ISO-639-1 code such as `en`.
+    *   `prompt`: Prompt text or keyword list (model-dependent) that guides the transcription output.
+*   `audio.input.turn_detection`: Optional automatic voice activity detection (VAD). Set to `null` to manage turn boundaries manually. For `server_vad`, you can tune `threshold`, `prefix_padding_ms`, `silence_duration_ms`, `interrupt_response`, `create_response`, and `idle_timeout_ms`. For `semantic_vad`, configure `eagerness`, `interrupt_response`, and `create_response`.
+*   `include`: Optional list of additional fields to stream back on events (for example `item.input_audio_transcription.logprobs`).
 
 You can find more information about the transcription session object in the [API reference](/docs/api-reference/realtime-sessions/transcription_session_object).
 
@@ -98,22 +113,18 @@ The Realtime API supports automatic voice activity detection (VAD). Enabled by d
 
 Read more about configuring VAD in our [Voice Activity Detection](/docs/guides/realtime-vad) guide.
 
-You can also disable VAD by setting the `turn_detection` property to `null`, and control when to commit the input audio on your end.
+You can also disable VAD by setting the `audio.input.turn_detection` property to `null`, and control when to commit the input audio on your end.
 
 Additional configurations
 -------------------------
 
 ### Noise reduction
 
-You can use the `input_audio_noise_reduction` property to configure how to handle noise reduction in the audio stream.
+Use the `audio.input.noise_reduction` property to configure how to handle noise reduction in the audio stream.
 
-The possible values are:
-
-*   `near_field`: Use near-field noise reduction.
-*   `far_field`: Use far-field noise reduction.
+*   `{ "type": "near_field" }`: Use near-field noise reduction (default).
+*   `{ "type": "far_field" }`: Use far-field noise reduction.
 *   `null`: Disable noise reduction.
-
-The default value is `near_field`, and you can disable noise reduction by setting the property to `null`.
 
 ### Using logprobs
 
@@ -123,24 +134,28 @@ Those logprobs can be used to calculate the confidence score of the transcriptio
 
 ```json
 {
-  "type": "transcription_session.update",
-  "input_audio_format": "pcm16",
-  "input_audio_transcription": {
-    "model": "gpt-4o-transcribe",
-    "prompt": "",
-    "language": ""
-  },
-  "turn_detection": {
-    "type": "server_vad",
-    "threshold": 0.5,
-    "prefix_padding_ms": 300,
-    "silence_duration_ms": 500,
-  },
-  "input_audio_noise_reduction": {
-    "type": "near_field"
-  },
-  "include": [ 
-    "item.input_audio_transcription.logprobs",
-  ],
+  "type": "session.update",
+  "session": {
+    "audio": {
+      "input": {
+        "format": {
+          "type": "audio/pcm",
+          "rate": 24000
+        },
+        "transcription": {
+          "model": "gpt-4o-transcribe"
+        },
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.5,
+          "prefix_padding_ms": 300,
+          "silence_duration_ms": 500
+        }
+      }
+    },
+    "include": [
+      "item.input_audio_transcription.logprobs"
+    ]
+  }
 }
 ```

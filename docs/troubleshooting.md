@@ -47,6 +47,7 @@
   - Keep “Show Context” open and confirm timestamps precede the response.
   - Add a small debounce (100–150ms) before `response.create` to give the data channel time to deliver context.
   - Provide an initial session config at construction (see `docs/realtime-agent.md`) to avoid early‑turn races.
+  - Prefer the combined sender (`app/test-app/services/context/index.ts`) which deduplicates and debounces ~120ms before `response.create`.
 
 ## Pyodide errors
 

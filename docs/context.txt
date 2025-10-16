@@ -1,42 +1,118 @@
-Project: Realtime AI Tutor (Next.js + Convex + OpenAI Realtime)
+# Studi — Context
 
-Current status
-- Prototype runs at `app/test-app/page.tsx` with three spaces: Whiteboard, Code IDE, Notes
-- Realtime voice tutor using OpenAI Realtime over WebRTC; tools operate whiteboard/IDE/notes
-- IDE runs Python in-browser via Pyodide; Judge0 integration is planned
-- Notes system is YAML‑first with interactive blocks (text, quiz, input, embed) rendered in the Notes tab
+## One-liner
+**Learn faster. Prove skills.**  
+(Currently delivering the **learn faster** part; proof/credentials come later.)
 
-Key references
-- UI: `app/test-app/page.tsx`, `app/test-app/components/AIVoiceAgentPanel.tsx`
-- Agent tools: `app/test-app/agent/tools/{whiteboard,ide,notes}.ts`, `app/test-app/agent/registry.ts`
-- Tool contracts/runtime: `app/test-app/types/toolContracts.ts`
-- Auto-context: helpers `app/test-app/lib/viewContext.ts`; combined sender `app/test-app/services/context/index.ts` (dedup + debounce), legacy fallback `app/test-app/services/autoContext.ts`
-- Tutor prompt: `app/test-app/prompts/tutor.ts` (persona variants). Legacy: `app/test-app/lib/realtimeInstructions.ts`.
-- Server: Convex `/realtime/token` in `convex/http.ts` → `convex/realtime.ts`
+---
 
-What we are building (finished product)
-- A performant, natural voice tutor that can teach on a shared whiteboard, run code securely via Judge0, and author rich lessons
-- Notes with markdown + custom blocks (quizzes, inputs, code cells, custom UI widgets) rendered interactively
-- Robust auto-context (compact JSON + image) with throttling/dedup, plus telemetry and guardrails
-- Production features: auth-gated token endpoint, sessions with resumable context, billing, and waitlist
+## Purpose
+Replace one-size-fits-all college models and transform hiring by making learning personal, interactive, and verifiable over time.
 
-Near-term tasks
-1) Voice agent quality and lifecycle
-   - Optimize VAD/response gating; debounce `response.create`; re-assert prompt on drift
-   - Cap/skip duplicate auto-context; JPEG sizing; tool call budget and concise preambles
-   - Standardize tool return envelopes and logs (done); add telemetry for tool calls
-2) IDE execution via Judge0
-   - Add submit/poll service; support multiple languages; surface output/errors; persist runs
-   - Expose agent tools to create files, set active, update content, and run via Judge0
-3) Notes system (interactive)
-   - Define markdown extensions (quiz/input/codecell/custom_ui) and renderer
-   - Add agent tools to write/append/insert blocks; prompts to guide lesson authoring
-   - Persist notes and versions in Convex
-4) Dynamic prompts & UX
-   - Topic-aware prompt variants (STEM, lesson-writing, quiz-mode)
-   - Device selectors, test tone, debug drawer with Context/Calls/Logs
-5) Productionization
-   - Auth for `/realtime/token`, rate limits, audit logs
-   - Session creation/storage/resume with minimal context digests
-   - Billing and waitlist flows
+---
 
+## Mission (Two Parts)
+1) **Learning (Studi App — live now in beta focus):**  
+A realtime, voice-first AI tutor that adapts minute-by-minute and collaborates with you on a shared whiteboard, inside an IDE, and on a lesson page. Hyper-personalized, hands-on, and context-aware.
+
+2) **Hiring (Proof of Skill — planned, not in current build):**  
+Portable skill records and employer-friendly verification built on top of learning artifacts. **Not shipped yet.**
+
+---
+
+## Problem
+- College content is static and paced for the average learner.  
+- Most tools stop at “completion,” not true mastery.  
+- Hiring still over-indexes on degrees instead of demonstrated skill.
+
+---
+
+## Solution (Current Scope = Learning)
+A **realtime, voice-first AI tutor** that sees what you’re working on and teaches by doing:
+- **Hyper-personalization:** one learner at a time; adapts to goals, knowledge gaps, and recent activity.
+- **Interactive cognition:** teaches through drawing, coding, running examples, and generating lesson content on the fly.
+- **Context awareness:** aware of your canvas, code, and lesson state to keep guidance grounded and specific.
+
+> Note: “Prove skills” is a **future layer**. Today we’re laser-focused on making the learning loop exceptional.
+
+---
+
+## Product (What’s in the app now)
+- **Realtime voice agent** that explains, asks questions, and guides your next step.
+- **Shared whiteboard** for diagrams, derivations, and visual reasoning.
+- **IDE workspace** (starting with Python) for writing/running code with agent assistance.
+- **Lesson page with YAML renderer**: the agent writes a structured **YAML** spec that renders:
+  - Markdown explanations
+  - Inline quizzes/checkpoints
+  - Lightweight custom UI elements (HTML/JS snippets) for interactive widgets
+  - Code blocks and runnable examples
+- **Interactive notes** tied to what you’re doing, not static lecture dumps.
+- **Safety guardrails** for destructive actions (confirmations/approvals).
+
+
+## Who It’s For (Starting Wedge)
+- Self-learners and professionals upskilling in **STEM**.
+- College or highschools students who want to master topics faster than a course timeline.
+
+
+## Differentiators
+- **Hyper-personal, live instruction** (not static videos or fixed pacing).
+- **Hands-on interactivity**, not just chat: draw, code, run, and revise in one flow.
+- **Context-aware tutoring** across whiteboard, code, and lesson state.
+- **(Planned)** Verifiable skill outputs for hiring—added later on top of the learning loop.
+
+---
+
+## Current Status (Today)
+- Working demo with:
+  - Shared whiteboard
+  - IDE (Python first)
+  - YAML-driven lesson page
+  - Interactive notes
+  - Realtime voice agent that can guide, draw, and help debug
+  - Basic confirmations for sensitive/destructive actions
+- Pre-launch with a **waitlist**; shipping a beta to early users next.
+
+---
+
+## Near-Term Roadmap (Subject to Change)
+- Public beta with early cohorts; tight feedback loop.
+- Multi-language code execution; safer server-side runs.
+- Persistence for files, runs, notes; lightweight learning analytics.
+- Harden auth, rate limits, reliability, and latency.
+- Early team/bootcamp use cases; pilot cohorts.
+- Prep for future **skill transcripts/portfolios** (design now, implement later).
+
+> Explicitly **out of scope for now**: employer credentials, external verifications, or any hiring integrations that imply completed “proof of skill.” Those will come **after** we nail the learning experience.
+
+---
+
+## Metrics We Care About (Learning)
+- Time-to-skill: time-to-solve representative problems.
+- Hint rate & hint decay: fewer/more targeted hints over time.
+- Quiz/checkpoint outcomes tied to the current lesson state.
+- Retention/return sessions and progression across topics.
+
+---
+
+## Risks & Mitigations
+- **LLM reliability / hallucination** → Ground responses in user context (whiteboard/code/lesson), show steps, add runnable checks.
+- **Latency** → Cache hot paths, stream partials, minimize round trips, selective tool calls.
+- **Scope creep to hiring** → Keep shipping cadence focused on learning loop; design future verifications, but don’t ship them yet.
+
+---
+
+## Team & What We Need
+- Building now; actively seeking early users (students, bootcamps, self-learners) for feedback.
+- Looking for collaborators on:
+  - Runtime safety & sandboxing
+  - Educational design for interactive lessons
+  - Future credentialing standards (design phase only)
+
+---
+
+## Call to Action
+- **Join the waitlist** and **book a demo** to try the realtime tutor and YAML-driven lesson pages.
+- Bring a problem you’re learning—let’s measure **time-to-skill** together.
+
+---

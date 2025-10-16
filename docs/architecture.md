@@ -94,7 +94,7 @@ OpenAI
   - Console + in‑app Logs for tool start/done/error with timing and rid
   - Action mapping logs from `page.tsx` including the final `editor.createShape` payload
 - tldraw v4.0.2 compatibility:
-  - `geo` shapes no longer set inline text; labels are treated as a no‑op to avoid schema errors
+  - `geo` shapes no longer set inline text; labeling creates a separate text shape near the target (via `agent_label`) to avoid schema errors
   - Unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback → `rectangle`)
   - Allowed `geo` values include: cloud, rectangle, ellipse, triangle, diamond, pentagon, hexagon, octagon, star, rhombus, rhombus-2, oval, trapezoid, arrow-right, arrow-left, arrow-up, arrow-down, x-box, check-box, heart
 

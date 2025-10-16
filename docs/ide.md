@@ -25,7 +25,7 @@ State model (client)
 - runState: { running: boolean }
 
 Execution
-- Python: Pyodide in browser (`loadPyodideOnce`)
+- Python: Pyodide in browser (`loadPyodideOnce` in `app/test-app/lib/pyodide.ts`)
 - Future: Judge0 wrapper
   - Submit: POST source + language + stdin → token
   - Poll: GET result by token until done → stdout/stderr/time/memory
