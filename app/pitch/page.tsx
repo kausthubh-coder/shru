@@ -819,8 +819,8 @@ function VisionSection() {
 
 function TeamSection() {
   const people = [
-    { name: "Kasuthub Nandimandalam", role: "Founder, CEO/CTO" },
-    { name: "Tristan Gtamenni", role: "Marketing" },
+    { name: "kausthubh Nandimandalam", role: "Founder, CEO/CTO" },
+    { name: "Trishanth Ghattamaneni", role: "Marketing" },
     { name: "Akhil Goslas", role: "Engineering" },
   ];
   return (
