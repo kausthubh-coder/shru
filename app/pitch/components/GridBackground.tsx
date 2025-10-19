@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { usePageNav } from "./pageNavContext";
 
 type GridBackgroundProps = {
@@ -10,16 +11,17 @@ type GridBackgroundProps = {
 
 export default function GridBackground({ intensity = 10, className }: GridBackgroundProps) {
   const { scrollTop } = usePageNav();
+  const reduced = useReducedMotion();
   const translateY = useMemo(() => {
-    const prefersReduced = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const prefersReduced = reduced || (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
     if (prefersReduced) return 0;
     const offset = scrollTop * 0.05; // subtle parallax
     const max = Math.max(0, Math.min(intensity, offset));
     return Math.floor(max);
-  }, [scrollTop, intensity]);
+  }, [scrollTop, intensity, reduced]);
 
   return (
-    <div
+    <motion.div
       aria-hidden
       className={
         "pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-none " + (className || "")
@@ -32,6 +34,9 @@ export default function GridBackground({ intensity = 10, className }: GridBackgr
         transform: `translateY(${translateY}px)`,
         transition: "transform 250ms ease-out",
       }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.6 }}
     />
   );
 }

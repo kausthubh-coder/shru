@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React from "react";
+import { motion, useReducedMotion } from "framer-motion";
 
 type RevealProps = {
   children: React.ReactNode;
@@ -8,45 +9,25 @@ type RevealProps = {
   className?: string;
   fromY?: number; // px
   fromScale?: number; // e.g. 0.96
+  step?: number; // current reveal step
+  need?: number; // required step to show
 };
 
-export default function Reveal({ children, delayMs = 0, className, fromY = 16, fromScale = 1 }: RevealProps) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const obs = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) {
-        if (prefersReduced) {
-          setVisible(true);
-          return;
-        }
-        const t = setTimeout(() => setVisible(true), delayMs);
-        return () => clearTimeout(t);
-      }
-    }, { threshold: 0.3 });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [delayMs]);
-
-  const style = visible
-    ? { opacity: 1, transform: "translateY(0) scale(1)" }
-    : {
-        opacity: 0,
-        transform: `translateY(${fromY}px) scale(${fromScale})`,
-      };
-
+export default function Reveal({ children, delayMs = 0, className, fromY = 16, fromScale = 1, step, need }: RevealProps) {
+  const reduced = useReducedMotion();
+  const shouldShow = typeof step === "number" && typeof need === "number" ? step >= need : true;
+  if (reduced) return <div className={className}>{children}</div>;
   return (
-    <div
-      ref={ref}
-      style={style}
-      className={(className || "") + " transition-all duration-300 ease-out motion-reduce:transform-none"}
+    <motion.div
+      initial={{ opacity: 0, y: fromY, scale: fromScale }}
+      whileInView={{ opacity: 1, y: 0, scale: 1 }}
+      animate={shouldShow ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: fromY, scale: fromScale }}
+      viewport={{ once: false, amount: 0.3 }}
+      transition={{ delay: delayMs / 1000, duration: 0.5, type: "spring", stiffness: 220 }}
+      className={className}
     >
       {children}
-    </div>
+    </motion.div>
   );
 }
 

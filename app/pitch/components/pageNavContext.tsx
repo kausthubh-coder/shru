@@ -8,6 +8,9 @@ export type PageNav = {
   goPrev: () => void;
   scrollToIndex: (i: number) => void;
   scrollTop: number;
+  mode?: "scroll" | "presentation";
+  revealStep?: number;
+  setRevealStep?: (n: number) => void;
 };
 
 export const PageNavContext = React.createContext<PageNav | null>(null);
