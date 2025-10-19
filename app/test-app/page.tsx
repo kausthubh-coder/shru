@@ -141,6 +141,12 @@ export default function TestAppPage() {
     setActiveFileId(id);
   }, []);
 
+  const getActiveFileSnapshot = useCallback(() => {
+    const f = activeFile;
+    if (!f) return null;
+    return { name: f.name, language: f.language, content: f.content };
+  }, [activeFile]);
+
   // Notes YAML document
   const initialYaml: NotesDocT = {
     title: "Notes",
@@ -215,6 +221,41 @@ export default function TestAppPage() {
       setIdeOutputs((prev) => [...out, ...prev].slice(0, 500));
     } catch (err: any) {
       setIdeOutputs((prev) => [{ type: 'stderr', text: String(err?.message ?? err), ts: Date.now() }, ...prev]);
+    } finally {
+      setIdeRunning(false);
+    }
+  }, [activeFile]);
+
+  const runActiveFileCollect = useCallback(async (): Promise<{ stdout: string; stderr: string; info: string[] }> => {
+    const lang = (activeFile?.language ?? '').toLowerCase();
+    if (!activeFile) {
+      return { stdout: '', stderr: '', info: ['No active file to run.'] };
+    }
+    if (lang !== 'python') {
+      return { stdout: '', stderr: '', info: ['Run currently supports Python only. Switch language to Python to execute.'] };
+    }
+    try {
+      setIdeRunning(true);
+      const pyodide = await loadPyodideOnce();
+      const out: Array<IdeOutput> = [];
+      const pushOut = (type: IdeOutput['type'], s: string) => out.push({ type, text: String(s), ts: Date.now() });
+      pyodide.setStdout({ batched: (s: string) => pushOut('stdout', s) });
+      pyodide.setStderr({ batched: (s: string) => pushOut('stderr', s) });
+      await pyodide.runPythonAsync(activeFile.content);
+      
+      // Aggregate outputs
+      const stdout = out.filter(o => o.type === 'stdout').map(o => o.text).join('');
+      const stderr = out.filter(o => o.type === 'stderr').map(o => o.text).join('');
+      const info = out.filter(o => o.type === 'info').map(o => o.text);
+      
+      // Also update UI state
+      setIdeOutputs((prev) => [...out, ...prev].slice(0, 500));
+      
+      return { stdout, stderr, info };
+    } catch (err: any) {
+      const errorMsg = String(err?.message ?? err);
+      setIdeOutputs((prev) => [{ type: 'stderr', text: errorMsg, ts: Date.now() }, ...prev]);
+      return { stdout: '', stderr: errorMsg, info: [] };
     } finally {
       setIdeRunning(false);
     }
@@ -418,6 +459,8 @@ export default function TestAppPage() {
         },
         updateActiveFileContent: (content: string) => { updateActiveFileContent(String(content ?? "")); },
         listFilesContext: () => ({ files: files.map((f) => ({ name: f.name, language: f.language, size: f.content.length })), active: activeFile?.name }),
+        getActiveFileSnapshot: () => getActiveFileSnapshot(),
+        runActiveFile: () => runActiveFileCollect(),
         getScreenshot: async () => await getScreenshot(),
         getViewContext: () => getViewContext(),
         dispatchAction: async (action: any) => { await dispatchAction(action); },
@@ -796,9 +839,41 @@ export default function TestAppPage() {
                   try {
                     if (!editor) return result;
                     if (_type === 'create') {
-                      const shapePayload: any = { type: 'geo', x: rest.shape?.x ?? 0, y: rest.shape?.y ?? 0, props: { w: rest.shape?.w ?? 100, h: rest.shape?.h ?? 80, geo: rest.shape?._type ?? 'rectangle' } };
-                      // Only set label if schema supports it; to be safe, skip inline text for geo
-                      // shapePayload.props.label = rest.shape?.text ?? '';
+                      const shapeType = rest.shape?._type;
+                      let shapePayload: any;
+                      
+                      if (shapeType === 'text') {
+                        // Create text shape with proper tldraw text type
+                        shapePayload = {
+                          type: 'text',
+                          x: rest.shape?.x ?? 0,
+                          y: rest.shape?.y ?? 0,
+                          props: {
+                            text: rest.shape?.text ?? '',
+                            w: rest.shape?.w ?? 220,
+                            h: rest.shape?.h ?? 60,
+                            color: rest.shape?.color ?? 'black'
+                          }
+                        };
+                      } else {
+                        // Create geo shape with allowed geo types
+                        const geoType = rest.shape?._type ?? 'rectangle';
+                        const normalizedGeo = ['rectangle', 'ellipse', 'triangle', 'diamond', 'pentagon', 'hexagon', 'octagon', 'star', 'rhombus', 'rhombus-2', 'oval', 'trapezoid', 'arrow-right', 'arrow-left', 'arrow-up', 'arrow-down', 'x-box', 'check-box', 'heart', 'cloud'].includes(geoType) 
+                          ? geoType 
+                          : 'rectangle'; // fallback
+                        
+                        shapePayload = {
+                          type: 'geo',
+                          x: rest.shape?.x ?? 0,
+                          y: rest.shape?.y ?? 0,
+                          props: {
+                            w: rest.shape?.w ?? 100,
+                            h: rest.shape?.h ?? 80,
+                            geo: normalizedGeo
+                          }
+                        };
+                      }
+                      
                       try { console.log('[tldraw:createShape]', shapePayload); } catch {}
                       editor.createShape(shapePayload as any);
                     } else if (_type === 'delete') {

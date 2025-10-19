@@ -63,6 +63,41 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     }),
   } as const;
 
+  const agent_create_text = {
+    name: "agent_create_text",
+    description: "Create a standalone text shape at coordinates.",
+    parameters: z.object({
+      x: z.number(),
+      y: z.number(),
+      text: z.string(),
+      w: z.number().default(220),
+      h: z.number().default(60),
+      color: z.string().default("black"),
+    }),
+    execute: wrapExecute("agent_create_text", async ({ x, y, text, w, h, color }: any): Promise<ToolResult<string>> => {
+      const nx = (typeof x === 'number' && isFinite(x)) ? x : null;
+      const ny = (typeof y === 'number' && isFinite(y)) ? y : null;
+      const nw = (typeof w === 'number' && isFinite(w)) ? w : 220;
+      const nh = (typeof h === 'number' && isFinite(h)) ? h : 60;
+      if (nx === null || ny === null) return { status: 'error', summary: 'invalid position' };
+      await runtime.whiteboard.dispatchAction({
+        _type: "create",
+        intent: "Create text",
+        shape: {
+          _type: 'text',
+          shapeId: Math.random().toString(36).slice(2),
+          x: nx,
+          y: ny,
+          w: nw,
+          h: nh,
+          text: String(text ?? ''),
+          color: String(color ?? 'black'),
+        },
+      });
+      return { status: 'ok', summary: `text created at (${x},${y})` };
+    }),
+  } as const;
+
   const agent_clear = {
     name: "agent_clear",
     description: "Clear the canvas (delete all shapes).",
@@ -385,6 +420,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     agent_capture_view_image,
     agent_create_shape,
     agent_create,
+    agent_create_text,
     agent_move,
     agent_label,
     agent_set_view,

@@ -38,6 +38,8 @@ export interface IdeRuntime {
   setActiveByName: (name: string) => boolean;
   updateActiveContent: (content: string) => void;
   getContext: () => { files: Array<{ name: string; language: string; size: number }>; active?: string };
+  getActiveContent: () => { name: string; language: string; content: string } | null;
+  runActive: () => Promise<{ stdout: string; stderr: string; info: string[] }>;
 }
 
 export interface NotesRuntime {

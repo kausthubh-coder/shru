@@ -25,7 +25,7 @@ The prototype centers on `app/test-app/page.tsx` with extracted components and m
 - Open logs (top-right) to see events
 - Tool logs print as `[tool:start|done|error]` along with a request id (rid) and elapsed time. Action mapping logs print `[act:start|map|done|error]` and the final `editor.createShape` payload.
 - Use “Show Context” to inspect the exact JSON `view_context` and the viewport screenshot sent to the model (helpers in `lib/viewContext.ts`, sender prefers `services/context/index.ts` with a fallback to `services/autoContext.ts`)
-- In the Notes tab, paste a sample YAML (see `docs/notes.md`) and click Apply to render. Use “Hide YAML” to focus on the lesson view.
+- In the Notes tab, paste a sample YAML into the YAML editor and click Apply to render. Use “Hide YAML” to focus on the lesson view.
 - Use “Show Calls” to see every tool call with name, rid, timing, and errors
 - In the Code tab, pick a language from the dropdown and press Run. Output appears in the Output panel below the editor. Currently Run supports Python only.
  - Dev Controls: select microphone/speaker devices, adjust VAD eagerness, toggle push‑to‑talk, and play a test tone.
@@ -48,7 +48,30 @@ Notes on tldraw v4.0.2 compatibility:
 - Inline text on `geo` shapes is disabled to avoid schema validation errors. The agent’s `agent_label` creates a separate text shape near the target when inline geo text is unsupported.
 - Unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback `rectangle`).
 
+Whiteboard text tools:
+- `agent_create_text(x, y, text, w?, h?, color?)` — creates a standalone text shape at the given coordinates. Prefer this for adding text; use `agent_label(shapeId, text)` to place a text label near an existing non‑text shape.
+
+IDE tools (Single-file Python):
+- `ide_read_code()` — returns `{ name, language, content }` of active file
+- `ide_apply_edits({ edits })` — applies precise edits (char or line ranges)
+- `ide_run_active()` — runs current Python file and returns `{ stdout, stderr, info }`
+- `ide_get_context()` — returns `{ files, active }` summary
+
 The agent uses these to reason about layout without expensive OCR.
+
+## Tools: registry, approvals, and telemetry
+
+- Tool registry: `agent/registry.ts` bundles tools from whiteboard, IDE, and notes into a single list which is registered with the Realtime agent.
+- Telemetry: Every tool execution is wrapped by `createWrapExecute` to emit:
+  - start/done/error events with a request id (rid) and duration (ms)
+  - a visible busy indicator in the UI (“Running tool…”) via `setToolBusy`
+  - structured logs like `[tool:start]`, `[tool:done]`, and `[tool:error]`
+- Approvals: Destructive actions require confirmation.
+  - `agent_clear` requests approval first and returns `approval_required` until the UI confirms; no clearing occurs by default.
+  - The UI can listen for an approval event (with `rid: "approval"`) and display a confirmation dialog before re-dispatching.
+- Labels/text:
+  - Inline labels on geo shapes are avoided for tldraw v4.0.2 compatibility; `agent_label` creates a nearby text shape instead of mutating the geo.
+  - For standalone text, use `agent_create_text(x, y, text, ...)`.
 
 ## Caveats
 

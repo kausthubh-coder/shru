@@ -5,7 +5,7 @@ This project is a Next.js app backed by Convex and authenticated with Clerk. It 
 Use this repo as a foundation for an AI-first, realtime, multimodal experience. The production app structure is scaffolded; the prototype lives at `app/test-app/page.tsx` while the agent experience is iterated.
 
 Highlights:
-- Auto-context per turn: the client attaches a compact JSON `view_context` (bounds + summarized shapes) and a viewport-bounded screenshot before each response.
+- Auto-context per turn: the client attaches a compact JSON `view_context` (bounds + summarized shapes) and, when visible, a viewport-bounded screenshot before each response.
 - Unified prompt: a single English‑only, realtime-voice prompt is injected via `session.update` after connect.
 - Initialization gating: the agent won’t respond until the session is configured; avoids early-turn drift.
 - Debug overlays: “Show Context” (exact JSON + image sent) and “Show Calls” (structured tool call feed) for fast debugging.
@@ -15,7 +15,7 @@ Highlights:
 - Implemented today
   - Test app at `app/test-app/page.tsx` with Whiteboard, Code IDE, Notes tabs
   - Voice agent over WebRTC with modular toolbelt (whiteboard/IDE/notes)
-  - Auto-context JSON + screenshot per turn; concise tutor instructions
+  - Auto-context combined JSON + screenshot per turn with short debounce; concise tutor instructions
   - IDE runs Python via Pyodide (client-side); output panel; device selectors/test tone
   - Logs, Context, and Tool Calls debug overlays
 - Planned next
@@ -24,7 +24,7 @@ Highlights:
   - Telemetry/guardrails for tool usage; context throttling/dedup; topic-aware prompts
   - Production hardening: auth gate + rate limits on `/realtime/token`, session resume, billing/waitlist
 
-See the living overview in `docs/context.txt` for current status, references, and near‑term tasks.
+See the living overview in `docs/context.txt` for current status, references, and the technical auto‑context notes.
 
 ## What’s inside
 
@@ -39,12 +39,9 @@ See the living overview in `docs/context.txt` for current status, references, an
 
 See in-depth docs in `docs/`:
 
-- `docs/architecture.md` — app layers and data flow
-- `docs/realtime-agent.md` — OpenAI Realtime integration, session gating (`session.updated`), persona/English‑only prompt guard, auto‑context strategy, and debug overlays
-- `docs/convex.md` — Convex functions, schema, and HTTP routes
 - `docs/test-app.md` — how to use the prototype page
-- `docs/troubleshooting.md` — common issues and fixes
-- `docs/docs.mdc` — documentation verification checklist (code → doc mapping)
+- `docs/ide.md` — IDE tools, Python execution, and output model
+- `docs/context.txt` — product context and auto‑context technical notes
 
 ## Quick start
 
@@ -80,7 +77,6 @@ npm run dev
 4) Open the app
 
 - App home: `http://localhost:3000/`
-- Server example: `http://localhost:3000/server`
 - Realtime tutor prototype: `http://localhost:3000/test-app`
   - Dock → Start → grant mic access
   - Toggle “Show Context” and “Show Calls” to inspect what the agent received and which tools it invoked
@@ -93,7 +89,7 @@ npm run dev
 4. The agent automatically receives compact whiteboard context and a screenshot, then speaks and acts via tool calls (align/move/create shapes, update labels, capture view, etc.).
 5. A single operating prompt is injected via `session.update` (English‑only, voice‑first, layout‑first). The app gates first turn until this completes.
 
-See `docs/realtime-agent.md` for the full flow and tool list.
+See `docs/test-app.md` for the full flow and tool list.
 
 ## Scripts
 

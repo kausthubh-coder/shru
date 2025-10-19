@@ -10,6 +10,8 @@ type BuildRuntimeParams = {
   setActiveFileIdByName: (name: string) => boolean;
   updateActiveFileContent: (content: string) => void;
   listFilesContext: () => { files: Array<{ name: string; language: string; size: number }>; active?: string };
+  getActiveFileSnapshot: () => { name: string; language: string; content: string } | null;
+  runActiveFile: () => Promise<{ stdout: string; stderr: string; info: string[] }>;
   getScreenshot: () => Promise<string | null>;
   getViewContext: () => any;
   dispatchAction: (action: any) => Promise<void>;
@@ -31,6 +33,8 @@ export function buildRuntime(params: BuildRuntimeParams): AgentRuntime {
     setActiveFileIdByName,
     updateActiveFileContent,
     listFilesContext,
+    getActiveFileSnapshot,
+    runActiveFile,
     getScreenshot,
     getViewContext,
     dispatchAction,
@@ -54,6 +58,8 @@ export function buildRuntime(params: BuildRuntimeParams): AgentRuntime {
       setActiveByName: (name) => setActiveFileIdByName(name),
       updateActiveContent: (content) => updateActiveFileContent(String(content ?? "")),
       getContext: () => listFilesContext(),
+      getActiveContent: () => getActiveFileSnapshot(),
+      runActive: () => runActiveFile(),
     },
     notes: {
       getText: () => notesGetText(),

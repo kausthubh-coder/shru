@@ -1,50 +1,45 @@
-# IDE Overhaul Plan
+# IDE tools and run (Monaco + Pyodide)
 
-Goals
-- Full-screen IDE experience: editor + bottom output panel
-- Multi-file workspace with file tree and active tab (WIP)
-- Execute code via Pyodide for Python (present). Judge0 service wrapper (planned) for multi-language execution
-- Persist files/results with Convex (planned)
+This document describes the IDE capabilities exposed to the agent and the UI in the test app.
 
-Current state
-- Single active file with language selector; Python executes via Pyodide (`app/test-app/lib/pyodide.ts`)
-- Output panel shows stdout/stderr/info; Run is Python-only
-- Agent tools exist for creating files, setting active, and updating content
+## Overview
+- Editor: Monaco under the Code tab
+- Runner: Python-only via Pyodide (in-browser)
+- Output panel: aggregated stdout/stderr/info
+- Language selector changes the editor language; Run only executes when language is Python
 
-UI/UX
-- IDE layout under the "Code" tab
-- Regions:
-  - Editor (fills page)
-  - Output panel (dockable bottom pane)
-- Toolbar: language dropdown + Run + toggle Output
-- Consistent dark theme, accessible controls, subtle borders
+## Available IDE tools
+Only the following tools are registered by the test app:
 
-State model (client)
-- files: Array<{ id, name, language, content }>
-- activeFileId: string
-- runState: { running: boolean }
+- ide_get_context()
+  - Returns JSON string of `{ files: Array<{ name, language, size }>, active?: string }`.
 
-Execution
-- Python: Pyodide in browser (`loadPyodideOnce` in `app/test-app/lib/pyodide.ts`)
-- Future: Judge0 wrapper
-  - Submit: POST source + language + stdin → token
-  - Poll: GET result by token until done → stdout/stderr/time/memory
-  - Map Monaco language to Judge0 languageId; sanitize inputs; cap size/time
+- ide_read_code()
+  - Returns JSON string `{ name, language, content }` for the active file.
 
-Convex schema additions (draft)
-- table: ide_files { userId?, name, language, content, folder? }
-- table: ide_runs { userId?, fileId, languageId, token, status, stdout, stderr, createdAt }
+- ide_apply_edits({ edits })
+  - Applies precise edits to the active file. Two edit forms:
+    - Char-range: `{ type: "char", range: { start, end }, text }`
+    - Line-range: `{ type: "line", range: { startLine, endLine }, text }`
+  - Summary reports the number of edits applied.
 
-Agent tools
-- ide_create_file(name, language, content)
-- ide_set_active(name)
-- ide_update_content(content)
-- ide_get_context() → summary of files, active, sizes
-- (planned) ide_run_active_via_judge0() → enqueues run and streams/polls results
+- ide_run_active()
+  - Runs the active file if its language is Python.
+  - Returns a ToolResult with `data` as JSON string `{ stdout, stderr, info }`.
+  - When the active language is not Python, it returns `{ stdout: "", stderr: "", info: ["Run currently supports Python only. Switch language to Python to execute."] }`.
 
-Milestones
-1) Full-screen layout and Python-only run (Pyodide)
-2) Add file tree and multiple files
-3) Integrate Judge0 submit+poll
-4) Persist files and runs in Convex; file tree CRUD
-5) Extend to multiple languages
+Multi-file management helpers exist internally (create/set active/update content) but are not exposed via the tool set above.
+
+## Execution details (Python)
+- Runtime: Pyodide v0.26 (loaded once by `app/test-app/lib/pyodide.ts`).
+- Stdout/stderr are captured and aggregated into the return payload.
+- The UI also mirrors outputs in the bottom Output panel and preserves recent lines.
+
+## UI quick reference
+- Language: choose Python to enable Run.
+- Run ▶: executes the active Python file; shows progress and streams aggregated output on completion.
+- Output panel: toggle visibility; includes timestamped lines per channel.
+
+## Limitations
+- Only Python execution is supported at the moment.
+- Edits operate on the current in-memory buffer; there is no persistence layer.

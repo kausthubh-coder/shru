@@ -40,6 +40,7 @@ A **realtime, voice-first AI tutor** that sees what you’re working on and teac
 ## Product (What’s in the app now)
 - **Realtime voice agent** that explains, asks questions, and guides your next step.
 - **Shared whiteboard** for diagrams, derivations, and visual reasoning.
+- Whiteboard text: the agent can add standalone text anywhere or label shapes via tools (`agent_create_text`, `agent_label`).
 - **IDE workspace** (starting with Python) for writing/running code with agent assistance.
 - **Lesson page with YAML renderer**: the agent writes a structured **YAML** spec that renders:
   - Markdown explanations
@@ -116,3 +117,43 @@ A **realtime, voice-first AI tutor** that sees what you’re working on and teac
 - Bring a problem you’re learning—let’s measure **time-to-skill** together.
 
 ---
+
+## Auto‑context (technical)
+
+What the model receives before most responses (sent over the realtime transport):
+
+- A compact JSON block named `view_context` describing the current viewport
+- A viewport‑bounded screenshot (data URL JPEG) when shapes are visible
+
+view_context JSON shape:
+
+```
+{
+  "type": "view_context",
+  "bounds": { /* viewport box */ },
+  "blurryShapes": [
+    { _type, shapeId, x, y, w, h, text?, geo?, color?, fill? },
+    // …up to ~60 items
+  ],
+  "peripheralClusters": [],
+  "selectedShapes": [ { _type, shapeId, x, y, w, h, text?, geo? } ]
+}
+```
+
+Send strategy:
+
+- Combined message: JSON (as `input_text`) + image (as `input_image`) in one `conversation.item.create`
+- Dedup window: ~300ms (skip resending if both JSON and image unchanged)
+- Response trigger: wait ~120ms after sending context, then `response.create`
+- Fallback: if combined send fails, send JSON first, then image (legacy path)
+
+Transport events used:
+
+- `conversation.item.create` — user message with `input_text` and optionally `input_image`
+- `response.create` — instruct the server to generate a response
+
+Notes:
+
+- If no shapes are visible, the screenshot is omitted
+- Errors are logged in the UI Logs panel and developer console
+- Debug overlays (“Show Context”, “Show Calls”) mirror exactly what was sent
