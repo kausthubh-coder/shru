@@ -30,6 +30,12 @@ Only the following tools are registered by the test app:
 
 Multi-file management helpers exist internally (create/set active/update content) but are not exposed via the tool set above.
 
+## Recommended flow (single-file, in-memory)
+- Read the current buffer with `ide_read_code()`.
+- Apply precise diffs with `ide_apply_edits({ edits })` using char or line ranges.
+- Run with `ide_run_active()` when the language is Python.
+- Do not create/switch files: the agent edits the in-memory buffer only; there is no persistence.
+
 ## Execution details (Python)
 - Runtime: Pyodide v0.26 (loaded once by `app/test-app/lib/pyodide.ts`).
 - Stdout/stderr are captured and aggregated into the return payload.

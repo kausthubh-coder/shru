@@ -15,6 +15,37 @@ export function buildNotesTools(runtime: AgentRuntime) {
     }),
   } as const;
 
+  const notes_read_file = {
+    name: "notes_read_file",
+    description: "Read a YAML lesson file from the IDE workspace and return its content as JSON { name, content }.",
+    parameters: z.object({ name: z.string().nullable() }),
+    execute: wrapExecute("notes_read_file", async ({ name }: any): Promise<string | ToolResult<string>> => {
+      try {
+        const ctx = runtime.ide.getContext();
+        const prevActive = ctx.active;
+        let changed = false;
+        if (typeof name === 'string' && name) {
+          if (name !== prevActive) {
+            const ok = runtime.ide.setActiveByName(name);
+            if (!ok) return { status: 'error', summary: `file not found: ${name}` };
+            changed = true;
+          }
+        } else if (!prevActive) {
+          return { status: 'error', summary: 'no active file to read' };
+        }
+        const snap = runtime.ide.getActiveContent();
+        if (!snap) return { status: 'error', summary: 'failed to read active file' };
+        // Restore previous active file if we changed it
+        if (changed && prevActive) {
+          try { runtime.ide.setActiveByName(prevActive); } catch {}
+        }
+        return JSON.stringify({ name: snap.name, content: snap.content });
+      } catch (e: any) {
+        return { status: 'error', summary: `read failed: ${String(e?.message ?? e)}` };
+      }
+    }),
+  } as const;
+
   const notes_append = {
     name: "notes_append",
     description: "Append markdown to the notes text.",
@@ -81,7 +112,7 @@ export function buildNotesTools(runtime: AgentRuntime) {
     }),
   } as const;
 
-  return [notes_set_text, notes_append, notes_set_yaml, notes_append_block_yaml];
+  return [notes_set_text, notes_append, notes_set_yaml, notes_append_block_yaml, notes_read_file];
 }
 
 

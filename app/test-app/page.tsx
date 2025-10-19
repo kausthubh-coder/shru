@@ -362,12 +362,31 @@ export default function TestAppPage() {
   // Send compact auto-context (viewport + shapes + image)
   const sendAutoContext = useCallback(async (triggerResponse: boolean = false) => {
     // Prefer combined (JSON + image in one item); fallback to legacy on failure
-    const res = await sendAutoContextCombined(editorRef, agentRef, sessionRef, appendLog, setDebugContext, triggerResponse);
+    const ideSnap = getActiveFileSnapshot();
+    const res = await sendAutoContextCombined(
+      editorRef,
+      agentRef,
+      sessionRef,
+      appendLog,
+      setDebugContext,
+      triggerResponse,
+      ideSnap,
+      notesYaml,
+    );
     if (res === 'error' || res === 'no-session') {
-      return await sendAutoContextService(editorRef, agentRef, sessionRef, appendLog, setDebugContext, triggerResponse);
+      return await sendAutoContextService(
+        editorRef,
+        agentRef,
+        sessionRef,
+        appendLog,
+        setDebugContext,
+        triggerResponse,
+        ideSnap,
+        notesYaml,
+      );
     }
     return res;
-  }, [appendLog]);
+  }, [appendLog, getActiveFileSnapshot, notesYaml]);
 
   // Now that helpers exist, define configureSession
   configureSession = useCallback(async () => {

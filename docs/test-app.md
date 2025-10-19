@@ -51,12 +51,15 @@ Notes on tldraw v4.0.2 compatibility:
 
 Whiteboard text tools:
 - `agent_create_text(x, y, text, w?, h?, color?)` — creates a standalone text shape at the given coordinates. Prefer this for adding text; use `agent_label(shapeId, text)` to place a text label near an existing non‑text shape.
+ - `agent_get_text_context()` — returns visible texts (and notes) from shapes in the current viewport.
 
 IDE tools (Single-file Python):
 - `ide_read_code()` — returns `{ name, language, content }` of active file
 - `ide_apply_edits({ edits })` — applies precise edits (char or line ranges)
 - `ide_run_active()` — runs current Python file and returns `{ stdout, stderr, info }`
 - `ide_get_context()` — returns `{ files, active }` summary
+
+- Workflow: read the active file, apply diffs, optionally run. No file creation/switching; edits modify the in-memory buffer only.
 
 The agent uses these to reason about layout without expensive OCR.
 

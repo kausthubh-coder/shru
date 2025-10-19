@@ -21,6 +21,8 @@ export async function sendAutoContext(
   appendLog: (line: string) => void,
   setDebugContext: DebugSetter,
   triggerResponse: boolean = false,
+  ideSnapshot?: { name: string; language: string; content: string } | null,
+  notesYaml?: string,
 ): Promise<'ok' | 'no-session' | 'noop' | 'error'> {
   const session = sessionRef.current;
   const transport = session?.transport;
@@ -28,14 +30,19 @@ export async function sendAutoContext(
 
   try {
     const ctx = getViewContext(editorRef.current, agentRef.current);
-    const compact = {
-      type: 'view_context',
+    const whiteboard = {
       bounds: ctx.bounds,
       blurryShapes: Array.isArray(ctx.blurryShapes) ? ctx.blurryShapes.slice(0, 60) : [],
       peripheralClusters: Array.isArray(ctx.peripheralClusters) ? ctx.peripheralClusters.slice(0, 32) : [],
       selectedShapes: Array.isArray(ctx.selectedShapes) ? ctx.selectedShapes.slice(0, 20) : [],
     };
-    const text = JSON.stringify(compact);
+    const workspace = {
+      type: 'workspace_context',
+      whiteboard,
+      ide: ideSnapshot ? { name: ideSnapshot.name, language: ideSnapshot.language, content: ideSnapshot.content } : null,
+      notes: { yaml: String(notesYaml ?? '') },
+    };
+    const text = JSON.stringify(workspace);
     const jsonHash = hashString(text);
 
     const imageUrl = await getViewportScreenshot(editorRef.current);

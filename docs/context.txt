@@ -122,21 +122,30 @@ A **realtime, voice-first AI tutor** that sees what you’re working on and teac
 
 What the model receives before most responses (sent over the realtime transport):
 
-- A compact JSON block named `view_context` describing the current viewport
+- A unified JSON block named `workspace_context` covering whiteboard, IDE, and notes
 - A viewport‑bounded screenshot (data URL JPEG) when shapes are visible
 
-view_context JSON shape:
+workspace_context JSON shape:
 
 ```
 {
-  "type": "view_context",
-  "bounds": { /* viewport box */ },
-  "blurryShapes": [
-    { _type, shapeId, x, y, w, h, text?, geo?, color?, fill? },
-    // …up to ~60 items
-  ],
-  "peripheralClusters": [],
-  "selectedShapes": [ { _type, shapeId, x, y, w, h, text?, geo? } ]
+  "type": "workspace_context",
+  "whiteboard": {
+    "bounds": { /* viewport box */ },
+    "blurryShapes": [
+      { _type, shapeId, x, y, w, h, text?, geo?, color?, fill? }
+    ],
+    "peripheralClusters": [],
+    "selectedShapes": [ { _type, shapeId, x, y, w, h, text?, geo? } ]
+  },
+  "ide": {
+    "name": "main.py",
+    "language": "python",
+    "content": "# full active buffer content here\nprint('hello')\n"
+  },
+  "notes": {
+    "yaml": "title: ...\nversion: 1\nblocks: ...\n" // full YAML content
+  }
 }
 ```
 

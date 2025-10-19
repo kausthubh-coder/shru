@@ -1,6 +1,6 @@
 # Docs Verification Checklist
 
-Last verified: 2025-10-16
+Last verified: 2025-10-19
 
 This file maps each doc in `docs/` to concrete code paths it describes. Update both the doc and this checklist together.
 
@@ -37,15 +37,16 @@ This file maps each doc in `docs/` to concrete code paths it describes. Update b
 ## realtime-agent.md → code
 - Session connect via `app/test-app/agent/session.ts`
 - Gating: wait for `session.updated` before first response (`page.tsx`)
-- Auto-context: preferred combined sender `services/context/index.ts` (debounce ~120ms, dedup ~300ms); fallback `services/autoContext.ts`
+- Auto-context: unified `workspace_context` (whiteboard + IDE + notes) via `services/context/index.ts` (debounce ~120ms, dedup ~300ms); fallback `services/autoContext.ts`
 - Tools registry: `app/test-app/agent/registry.ts`; tools in `agent/tools/*`
 - Approvals: `agent_clear` emits approval request and returns `approval_required`
 - Audio defaults: model `gpt-realtime`, input `audio/pcm@24000` (semantic VAD create_response=false), output `audio/pcm`, voice `marin`
 - Text shape schema (v4): `type: 'text'` requires `props.richText` (via `toRichText(...)`). The app maps plain `text` → `richText` when creating shapes. Avoid `props.text` or `props.label` on text shapes.
+ - Whiteboard: includes `agent_get_text_context` to surface visible text items in the viewport
 
 ## ide.md → code
 - Run is Python-only via Pyodide: `app/test-app/lib/pyodide.ts` (`loadPyodideOnce`)
-- Agent tools: `ide_create_file`, `ide_set_active`, `ide_update_content`, `ide_get_context`
+- Agent tools: `ide_read_code`, `ide_apply_edits`, `ide_run_active`, `ide_get_context`
 - UI: editor + output panel in Code tab (`page.tsx`)
 
 ## notes.md → code
@@ -53,6 +54,7 @@ This file maps each doc in `docs/` to concrete code paths it describes. Update b
   - Interactive blocks (`quiz|input|embed`) require unique `id`
   - Providers: `codepen|stackblitz|jsfiddle`; `height` range enforced
 - Tools: `notes_set_yaml`, `notes_append_block_yaml`; legacy `notes_set_text`, `notes_append`
+- New tool: `notes_read_file(name?)` — reads `{ name, content }` from IDE workspace without mutating state
 - Components: `NotesEditor`, `NotesRenderer`
 
 ## test-app.md → code

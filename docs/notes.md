@@ -58,6 +58,7 @@ Implementation (test-app)
 - Schemas/types: `app/test-app/types/notesYaml.ts` (zod + js-yaml) with helpers `parseNotesYaml`, `parseBlockYaml`, `serializeNotesYaml`.
 - Components: `NotesRenderer` and `NotesEditor` under `app/test-app/components/`.
 - Tools: `notes_set_yaml`, `notes_append_block_yaml` plus legacy `notes_set_text`, `notes_append` in `app/test-app/agent/tools/notes.ts`.
+- New (read-only): `notes_read_file(name?)` — reads a YAML lesson from the IDE workspace. If `name` is provided, temporarily switches to that file; otherwise reads the active file. Returns a JSON string `{ name, content }`.
 - Wiring: Notes tab in `app/test-app/page.tsx` uses the YAML editor + renderer.
 
 Security

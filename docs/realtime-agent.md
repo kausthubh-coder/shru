@@ -18,13 +18,13 @@ This page explains how the test app uses OpenAI's Realtime API to run a voice-ba
 3. Connects a `RealtimeSession` with the secret via the session handle.
 4. Sends a `session.update` to configure model (`gpt-realtime`), audio IO, and persona‑based tutor instructions.
 5. Gates first response until the session is updated (avoids early-turn drift).
-6. Streams auto-context: a compact `view_context` JSON plus a viewport-bounded JPEG snapshot.
+6. Streams auto-context: a unified `workspace_context` JSON (whiteboard + IDE + notes) plus a viewport-bounded JPEG snapshot.
 
 - The instructions string is built in `app/test-app/prompts/tutor.ts` (persona variants) and sent via `session.update`. The legacy `app/test-app/lib/realtimeInstructions.ts` remains for a single‑prompt variant.
  - The auto‑context JSON and screenshot are produced by `app/test-app/lib/viewContext.ts`. A combined sender in `app/test-app/services/context/index.ts` posts both in one message with dedup/throttle; on failure it falls back to the legacy `app/test-app/services/autoContext.ts` two‑message flow.
 
 ### Hallucinations and unrelated actions
-- Keep auto-context compact and accurate; verify `view_context` JSON and screenshots match the current viewport.
+- Keep auto-context compact and accurate; verify `workspace_context` JSON and screenshots match the current viewport.
 - Limit tool call budget per turn; add concise preambles; re-assert instructions when drift detected.
 - Add telemetry for tool start/done/error and detect off-topic calls to trigger a prompt re-assert via `session.update`.
   - Unified logs: Console and in‑app Logs capture `[tool:start|done|error]` with rid and timings. Action mapping logs show `[act:start|map|done|error]` and the final `editor.createShape` payload for debugging.
@@ -55,6 +55,7 @@ Whiteboard tools (selection):
 - `agent_create_shape` / `agent_create` — create geo shapes (rectangles, ellipses, etc.). For tldraw v4.0.2, inline text on geo is disabled and unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback → `rectangle`).
 - `agent_move`, `agent_resize`, `agent_rotate` — transform existing shapes
 - `agent_label`, `agent_update` — change text/appearance
+- `agent_get_text_context` — return visible texts from shapes in the viewport
 - `agent_align`, `agent_distribute`, `agent_stack`, `agent_place` — layout tools
 - `agent_bring_to_front`, `agent_send_to_back` — z-order
 - `agent_delete`, `agent_clear` — remove shapes / clear canvas
@@ -68,10 +69,11 @@ Camera + context:
 
 IDE and Notes:
 
-- `ide_create_file`, `ide_set_active`, `ide_update_content`, `ide_get_context`
+- `ide_read_code`, `ide_apply_edits`, `ide_run_active`, `ide_get_context`
 - `notes_set_text`, `notes_append`
 - `notes_set_yaml` — replace entire notes YAML after validation
 - `notes_append_block_yaml` — append a single validated block (enforces id uniqueness)
+- `notes_read_file(name?)` — read a YAML lesson from the IDE workspace without mutating state
 
 Text shape note (tldraw v4): Text shapes must use `props.richText`. We convert plain strings to rich text via `toRichText(...)` when creating text. Do not set `props.text` or `props.label` on `type = 'text'` shapes—those are invalid and will trigger validation errors.
 
@@ -81,7 +83,10 @@ Labeling note: `agent_label` creates a separate text shape near the target when 
 
 Before most responses, the client:
 
-- Sends a compact `view_context` JSON (bounds, blurry shapes, peripheral clusters, selected shapes)
+- Sends a unified `workspace_context` JSON with:
+  - Whiteboard: bounds, blurry shapes, peripheral clusters, selected shapes
+  - IDE: name, language, full active buffer content
+  - Notes: full YAML document
 - Captures and sends a screenshot of the viewport when available
 - Uses a combined sender that deduplicates within a short window (skips no‑ops) and debounces ~120ms before `response.create`
 
@@ -99,7 +104,7 @@ This enables OCR‑free reasoning about structure while using the image for visu
 
 ### Debug overlays
 
-- “Show Context” displays the last `view_context` JSON and screenshot sent to the model.
+- “Show Context” displays the last `workspace_context` JSON and screenshot sent to the model.
 - “Show Calls” displays structured tool start/done/error with rid, timings, and small payload previews.
 - Use these to verify the model saw the correct viewport and actually called a tool before you suspect the prompt.
 
