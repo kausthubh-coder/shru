@@ -45,7 +45,8 @@ The page periodically sends:
   - Screenshot is omitted when no shapes are visible in the viewport.
 
 Notes on tldraw v4.0.2 compatibility:
-- Inline text on `geo` shapes is disabled to avoid schema validation errors. The agent’s `agent_label` creates a separate text shape near the target when inline geo text is unsupported.
+- Text shapes must be created with `props.richText` (use `toRichText('...')`). Using `props.text` or `props.label` on `type: 'text'` will fail validation.
+- Geo shape text content should also use `props.richText`; avoid `label`. The app avoids inline geo text where unsupported and instead places a nearby text label when needed.
 - Unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback `rectangle`).
 
 Whiteboard text tools:

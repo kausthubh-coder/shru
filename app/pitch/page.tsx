@@ -58,14 +58,16 @@ function HeroSection() {
     <Section>
       <GridBackground />
       <div className="relative w-full max-w-4xl text-center text-black">
-        <div className="absolute -right-6 -top-10 animate-[float_3s_ease-in-out_infinite] motion-reduce:animate-none" aria-hidden>
+        <div className="absolute -right-6 -top-10 animate-[float_3s_ease-in-out_infinite] motion-reduce:animate-none will-change-transform" aria-hidden>
           <PaperPlane />
         </div>
         <Reveal>
-          <h1 className="mb-4 text-4xl font-extrabold tracking-tight md:text-6xl">Bring your learning to life.</h1>
+          <h1 className="mb-4 text-4xl font-extrabold tracking-tight md:text-6xl [text-wrap:balance]">
+            Bring your learning to life.
+          </h1>
         </Reveal>
         <Reveal delayMs={80}>
-          <p className="mx-auto mb-8 max-w-2xl text-lg text-black/80">
+          <p className="mx-auto mb-8 max-w-2xl text-lg text-black/80 [text-wrap:pretty]">
             Realtime AI tutor for interactive, personal, measurable learning.
           </p>
         </Reveal>
@@ -75,6 +77,16 @@ function HeroSection() {
         >
           Start
         </a>
+        {/* Subtle keyboard hint */}
+        <div className="mt-6 flex items-center justify-center gap-3 text-sm text-black/60">
+          <kbd className="rounded border border-black/20 bg-white px-2 py-0.5 shadow-sm">Space</kbd>
+          <span>or</span>
+          <div className="flex items-center gap-1">
+            <kbd className="rounded border border-black/20 bg-white px-1.5 py-0.5 shadow-sm">↑</kbd>
+            <kbd className="rounded border border-black/20 bg-white px-1.5 py-0.5 shadow-sm">↓</kbd>
+          </div>
+          <span>to navigate</span>
+        </div>
       </div>
     </Section>
   );
@@ -156,10 +168,12 @@ function SolutionSection() {
             { title: "Notes", alt: "Notes screenshot" },
           ].map((item) => (
             <Reveal key={item.title}>
-            <div className="group relative overflow-hidden rounded-xl border border-black/15 bg-white p-4 shadow-sm transition will-change-transform [transform:perspective(800px)] hover:[transform:perspective(800px)_rotateX(3deg)_rotateY(-3deg)]">
-              <div className="aspect-video w-full rounded-md bg-black/5" aria-label={item.alt} />
-              <div className="mt-3 font-medium">{item.title}</div>
-            </div>
+              <div className="group relative overflow-hidden rounded-xl border border-black/15 bg-white p-4 shadow-sm transition will-change-transform [transform:perspective(800px)] hover:[transform:perspective(800px)_rotateX(3deg)_rotateY(-3deg)]">
+                <div className="aspect-video w-full rounded-md bg-gradient-to-br from-black/5 to-black/10 grid place-items-center">
+                  <div className="h-10 w-10 rounded-full border border-black/10 bg-white/60 backdrop-blur-sm shadow-sm grid place-items-center text-xs text-black/60 opacity-0 group-hover:opacity-100 transition">Demo</div>
+                </div>
+                <div className="mt-3 font-medium">{item.title}</div>
+              </div>
             </Reveal>
           ))}
         </div>
@@ -207,7 +221,7 @@ function TechSection() {
         </div>
         <div className="mt-6 grid grid-cols-2 gap-2 text-center text-sm sm:grid-cols-4">
           {["Next.js", "Convex", "Clerk", "Tailwind", "tldraw", "Pyodide", "Monaco"].map((s) => (
-            <div key={s} className="rounded-md border border-black/15 bg-white px-3 py-2 shadow-sm">{s}</div>
+            <div key={s} className="rounded-md border border-black/15 bg-white px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:shadow">{s}</div>
           ))}
         </div>
       </div>

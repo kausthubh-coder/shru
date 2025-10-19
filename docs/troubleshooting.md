@@ -31,6 +31,8 @@
   - The installed version (v4.0.2) only allows certain `geo` values (e.g., rectangle, ellipse, triangle, rhombus, etc.). The app now normalizes unknown values to the nearest supported one (e.g., parallelogram → rhombus; fallback rectangle).
 - If you see errors about `props.text` or `props.label` on `geo` shapes:
   - v4.0.2 doesn’t accept inline text for `geo`. The app disables inline labels for `geo` to prevent schema errors. Use a separate text shape if you need labels.
+- If you see errors like `At shape(type = text).props.label: Unexpected property` or similar for text shapes:
+  - In tldraw v4, text shapes must use `props.richText` (a document-like structure). Convert plain strings with `toRichText('your text')` and set `props.richText` when creating `type: 'text'`. Do not use `props.text` or `props.label` on text shapes.
 - Check DevTools console:
   - Look for `[tldraw:createShape]` to see the final payload. Look for `[geo:coerce] from=... → ...` to confirm normalization took place.
 

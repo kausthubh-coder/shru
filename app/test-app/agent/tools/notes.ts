@@ -30,7 +30,21 @@ export function buildNotesTools(runtime: AgentRuntime) {
     description: "Replace the entire notes YAML document.",
     parameters: z.object({ yaml: z.string() }),
     execute: wrapExecute("notes_set_yaml", async ({ yaml }: any): Promise<ToolResult<string>> => {
-      const { doc, errors } = parseNotesYaml(String(yaml ?? ""));
+      // Normalize whitespace and trim; if user passed a one-item list, unwrap it
+      let input = String(yaml ?? "");
+      input = input.trim();
+      if (input.startsWith("- ")) {
+        try {
+          const maybe = parseBlockYaml(input);
+          if (!maybe.errors.length && maybe.block) {
+            const wrapped = { title: "Notes", version: 1, blocks: [maybe.block] } as NotesDocT;
+            const nextYaml = serializeNotesYaml(wrapped);
+            runtime.notes.setText(nextYaml);
+            return { status: 'ok', summary: `notes yaml set (single block)` };
+          }
+        } catch {}
+      }
+      const { doc, errors } = parseNotesYaml(input);
       if (errors.length || !doc) return { status: 'error', summary: `invalid yaml: ${errors[0] || 'parse error'}` };
       const nextYaml = serializeNotesYaml(doc);
       runtime.notes.setText(nextYaml);
@@ -45,9 +59,16 @@ export function buildNotesTools(runtime: AgentRuntime) {
     execute: wrapExecute("notes_append_block_yaml", async ({ blockYaml }: any): Promise<ToolResult<string>> => {
       const current = (runtime as any).notes?.getText?.() as string | undefined;
       const existing = typeof current === 'string' ? current : '';
-      const { doc, errors } = parseNotesYaml(existing || "title: Notes\nversion: 1\nblocks: []\n");
+      const { doc, errors } = parseNotesYaml((existing || "title: Notes\nversion: 1\nblocks: []\n").trim());
       if (errors.length || !doc) return { status: 'error', summary: `existing yaml invalid: ${errors[0] || 'parse error'}` };
-      const parsed = parseBlockYaml(String(blockYaml ?? ""));
+      let snippet = String(blockYaml ?? "").trim();
+      // If tool mistakenly sends a list with a single item, unwrap it by removing leading dash and space
+      if (/^\s*-\s/.test(snippet)) {
+        const lines = snippet.split(/\r?\n/);
+        if (lines.length) lines[0] = lines[0].replace(/^\s*-\s*/, '');
+        snippet = lines.join('\n');
+      }
+      const parsed = parseBlockYaml(snippet);
       if (parsed.errors.length || !parsed.block) return { status: 'error', summary: `block invalid: ${parsed.errors[0] || 'parse error'}` };
       // Enforce id uniqueness for blocks requiring ids
       if ((parsed.block.type === 'quiz' || parsed.block.type === 'input' || parsed.block.type === 'embed') && doc.blocks.some((b: any) => (b as any).id === (parsed.block as any).id)) {

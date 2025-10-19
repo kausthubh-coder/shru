@@ -3,11 +3,11 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { Tldraw } from "tldraw";
+import { toRichText } from "@tldraw/tlschema";
 import "tldraw/tldraw.css";
 // Local minimal helpers to avoid missing agent/shared imports
 import { AIVoiceAgentPanel } from "./components/AIVoiceAgentPanel";
 import { loadPyodideOnce } from "./lib/pyodide";
-import { buildTutorInstructions } from "./lib/realtimeInstructions";
 import { buildTutorInstructions as buildPersonaInstructions } from "./prompts/tutor";
 import { getViewContext as computeViewContext, getViewportScreenshot } from "./lib/viewContext";
 import { sendAutoContext as sendAutoContextService } from "./services/autoContext";
@@ -396,7 +396,7 @@ export default function TestAppPage() {
     } catch (e: any) {
       appendLog(`session.update error: ${String(e?.message ?? e)}`);
     }
-  }, [appendLog, buildTutorInstructions, sendAutoContext]);
+  }, [appendLog, sendAutoContext]);
 
   // Removed floating Python windows in favor of full-page IDE
 
@@ -416,7 +416,7 @@ export default function TestAppPage() {
         type: "geo",
         x,
         y,
-        props: { w: 240, h: 80, geo: "rectangle", label: text ?? "" },
+        props: { w: 240, h: 80, geo: "rectangle", richText: toRichText(String(text ?? "")) },
       } as any);
       appendLog(`add_text "${text}" as geo at (${x}, ${y})`);
     } catch (e) {
@@ -798,7 +798,7 @@ export default function TestAppPage() {
           type: 'session.update',
           session: {
             type: 'realtime',
-            instructions: buildTutorInstructions(),
+            instructions: buildPersonaInstructions('default'),
             audio: {
               input: { format: { type: 'audio/pcm', rate: 24000 }, turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: true, interrupt_response: true } },
               output: { format: { type: 'audio/pcm' }, voice: 'marin' },
@@ -807,7 +807,7 @@ export default function TestAppPage() {
         } as any);
       }
     } catch {}
-  }, [appendLog, buildTutorInstructions]);
+  }, [appendLog]);
 
   const toggleMute = useCallback(() => {
     const next = !muted;
@@ -843,16 +843,14 @@ export default function TestAppPage() {
                       let shapePayload: any;
                       
                       if (shapeType === 'text') {
-                        // Create text shape with proper tldraw text type
+                        // Create text shape with proper tldraw v4 props: use richText and w only
                         shapePayload = {
                           type: 'text',
                           x: rest.shape?.x ?? 0,
                           y: rest.shape?.y ?? 0,
                           props: {
-                            text: rest.shape?.text ?? '',
                             w: rest.shape?.w ?? 220,
-                            h: rest.shape?.h ?? 60,
-                            color: rest.shape?.color ?? 'black'
+                            richText: toRichText(String(rest.shape?.text ?? '')),
                           }
                         };
                       } else {

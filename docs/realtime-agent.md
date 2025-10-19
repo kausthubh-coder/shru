@@ -73,7 +73,9 @@ IDE and Notes:
 - `notes_set_yaml` — replace entire notes YAML after validation
 - `notes_append_block_yaml` — append a single validated block (enforces id uniqueness)
 
-Labeling note: `agent_label` creates a separate text shape near the target when inline geo text is unsupported (tldraw v4.0.2).
+Text shape note (tldraw v4): Text shapes must use `props.richText`. We convert plain strings to rich text via `toRichText(...)` when creating text. Do not set `props.text` or `props.label` on `type = 'text'` shapes—those are invalid and will trigger validation errors.
+
+Labeling note: `agent_label` creates a separate text shape near the target when inline geo text is unsupported (tldraw v4.0.2). For geo shapes, any text content should also be set via `props.richText` rather than `label`.
 
 ## Auto‑context strategy
 

@@ -41,6 +41,7 @@ This file maps each doc in `docs/` to concrete code paths it describes. Update b
 - Tools registry: `app/test-app/agent/registry.ts`; tools in `agent/tools/*`
 - Approvals: `agent_clear` emits approval request and returns `approval_required`
 - Audio defaults: model `gpt-realtime`, input `audio/pcm@24000` (semantic VAD create_response=false), output `audio/pcm`, voice `marin`
+- Text shape schema (v4): `type: 'text'` requires `props.richText` (via `toRichText(...)`). The app maps plain `text` → `richText` when creating shapes. Avoid `props.text` or `props.label` on text shapes.
 
 ## ide.md → code
 - Run is Python-only via Pyodide: `app/test-app/lib/pyodide.ts` (`loadPyodideOnce`)
@@ -64,7 +65,7 @@ This file maps each doc in `docs/` to concrete code paths it describes. Update b
 - Token and CORS checks match `convex/http.ts`
 - Language guard path uses `session.update`
 - Race mitigation: combined sender + ~120ms debounce
-- tldraw geo rules and label behavior
+- tldraw geo rules and label behavior; text uses `richText` for both `text` and `geo` shapes.
 
 ## Planned vs Present
 - Present in code: items listed above only
