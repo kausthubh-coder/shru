@@ -159,3 +159,5 @@ Those logprobs can be used to calculate the confidence score of the transcriptio
   }
 }
 ```
+
+Was this page useful?

@@ -49,6 +49,72 @@ wsSession.on('audio', (event) => {
 wsSession.sendAudio(myRecordedArrayBuffer);
 
 Use any recording/playback library to handle the raw PCM16 audio bytes.
+Connecting over SIP
+
+Bridge SIP calls from providers such as Twilio by using the OpenAIRealtimeSIP transport. The transport keeps the Realtime session synchronized with SIP events emitted by your telephony provider.
+
+    Accept the incoming call by generating an initial session configuration with OpenAIRealtimeSIP.buildInitialConfig(). This ensures the SIP invitation and Realtime session share identical defaults.
+    Attach a RealtimeSession that uses the OpenAIRealtimeSIP transport and connect with the callId issued by the provider webhook.
+    Listen for session events to drive call analytics, transcripts, or escalation logic.
+
+import OpenAI from 'openai';
+import {
+  OpenAIRealtimeSIP,
+  RealtimeAgent,
+  RealtimeSession,
+  type RealtimeSessionOptions,
+} from '@openai/agents/realtime';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+  webhookSecret: process.env.OPENAI_WEBHOOK_SECRET!,
+});
+
+const agent = new RealtimeAgent({
+  name: 'Receptionist',
+  instructions:
+    'Welcome the caller, answer scheduling questions, and hand off if the caller requests a human.',
+});
+
+const sessionOptions: Partial<RealtimeSessionOptions> = {
+  model: 'gpt-realtime',
+  config: {
+    audio: {
+      input: {
+        turnDetection: { type: 'semantic_vad', interruptResponse: true },
+      },
+    },
+  },
+};
+
+export async function acceptIncomingCall(callId: string): Promise<void> {
+  const initialConfig = await OpenAIRealtimeSIP.buildInitialConfig(
+    agent,
+    sessionOptions,
+  );
+  await openai.realtime.calls.accept(callId, initialConfig);
+}
+
+export async function attachRealtimeSession(
+  callId: string,
+): Promise<RealtimeSession> {
+  const session = new RealtimeSession(agent, {
+    transport: new OpenAIRealtimeSIP(),
+    ...sessionOptions,
+  });
+
+  session.on('history_added', (item) => {
+    console.log('Realtime update:', item.type);
+  });
+
+  await session.connect({
+    apiKey: process.env.OPENAI_API_KEY!,
+    callId,
+  });
+
+  return session;
+}
+
 Cloudflare Workers (workerd) note
 
 Cloudflare Workers and other workerd runtimes cannot open outbound WebSockets using the global WebSocket constructor. Use the Cloudflare transport from the extensions package, which performs the fetch()-based upgrade internally.

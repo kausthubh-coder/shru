@@ -2,6 +2,12 @@
 
 This page explains how the test app uses OpenAI's Realtime API to run a voice-based tutor that can observe the whiteboard and act via tools.
 
+**Related docs:**
+- [Architecture Overview](architecture.md) — System architecture and data flow
+- [Convex Backend](convex.md) — Token minting endpoint
+- [IDE Tools](ide.md) — IDE tool details
+- [Notes System](notes.md) — Notes/YAML tools
+
 ## Token minting (server)
 
 - Endpoint: `GET /realtime/token` implemented in `convex/http.ts`.
@@ -23,16 +29,23 @@ This page explains how the test app uses OpenAI's Realtime API to run a voice-ba
 - The instructions string is built in `app/test-app/prompts/tutor.ts` (persona variants) and sent via `session.update`. The legacy `app/test-app/lib/realtimeInstructions.ts` remains for a single‑prompt variant.
  - The auto‑context JSON and screenshot are produced by `app/test-app/lib/viewContext.ts`. A combined sender in `app/test-app/services/context/index.ts` posts both in one message with dedup/throttle; on failure it falls back to the legacy `app/test-app/services/autoContext.ts` two‑message flow.
 
-### Hallucinations and unrelated actions
-- Keep auto-context compact and accurate; verify `workspace_context` JSON and screenshots match the current viewport.
-- Limit tool call budget per turn; add concise preambles; re-assert instructions when drift detected.
-- Add telemetry for tool start/done/error and detect off-topic calls to trigger a prompt re-assert via `session.update`.
-  - Unified logs: Console and in‑app Logs capture `[tool:start|done|error]` with rid and timings. Action mapping logs show `[act:start|map|done|error]` and the final `editor.createShape` payload for debugging.
+### Preventing Hallucinations and Unrelated Actions
 
-### Initialization gating
+- Keep auto-context compact and accurate; verify `workspace_context` JSON and screenshots match the current viewport
+- Limit tool call budget per turn; add concise preambles; re-assert instructions when drift detected
+- Telemetry: Console and in-app Logs capture `[tool:start|done|error]` with request ID (rid) and timings
+- Action mapping logs show `[act:start|map|done|error]` and the final `editor.createShape` payload for debugging
+- Detect off-topic calls to trigger a prompt re-assert via `session.update`
 
-- After connecting, the client injects the operating prompt via `session.update` and waits for `session.updated` before allowing a first response. Auto‑context + `response.create` are triggered only after this ack.
-- You can also pass an initial session config on construction to reduce races:
+### Initialization Gating
+
+To prevent early-turn drift, the client gates the first response:
+
+1. After connecting, the client injects the operating prompt via `session.update`
+2. Waits for `session.updated` event acknowledgment
+3. Only then triggers auto-context + `response.create`
+
+**Alternative:** Pass an initial session config on construction to reduce races:
 
 ```ts
 const session = new RealtimeSession(agent, {
@@ -50,22 +63,29 @@ The agent registers tools via a modular registry. Definitions live in `app/test-
 ### Destructive tool approvals
 Some tools (e.g., `agent_clear`) are flagged for approval. The tool emits an approval request via the runtime event stream (`onToolEvent`) and returns `approval_required` unless approved; the page can present a confirmation UI (see `app/test-app/components/ToolApprovalDialog.tsx`) and re‑dispatch.
 
-Whiteboard tools (selection):
+Whiteboard tools:
 
+**Shape creation:**
 - `agent_create_shape` / `agent_create` — create geo shapes (rectangles, ellipses, etc.). For tldraw v4.0.2, inline text on geo is disabled and unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback → `rectangle`).
+- `agent_create_text` — create standalone text shapes at coordinates
+- `agent_pen` — draw paths with points (smooth/straight, optional fill)
+
+**Shape manipulation:**
 - `agent_move`, `agent_resize`, `agent_rotate` — transform existing shapes
-- `agent_label`, `agent_update` — change text/appearance
-- `agent_get_text_context` — return visible texts from shapes in the viewport
+- `agent_label` — create a text label near a shape (creates separate text shape for tldraw v4 compatibility)
+- `agent_update` — update shape properties (text, color, fill, position, size, geo type)
+- `agent_delete`, `agent_clear` — remove shapes / clear canvas (clear requires approval)
+
+**Layout & organization:**
 - `agent_align`, `agent_distribute`, `agent_stack`, `agent_place` — layout tools
-- `agent_bring_to_front`, `agent_send_to_back` — z-order
-- `agent_delete`, `agent_clear` — remove shapes / clear canvas
+- `agent_bring_to_front`, `agent_send_to_back` — z-order management
 
-Camera + context:
-
-- `agent_set_view` — move the viewport camera
-- `agent_get_view_context` — returns summarized context JSON
-- `agent_get_screenshot` — returns a data URL image
-- `agent_send_view_image` — attaches an image to the conversation and triggers a response
+**Context & camera:**
+- `agent_get_view_context` — returns summarized context JSON (bounds, shapes, selections)
+- `agent_get_screenshot` / `agent_capture_view_image` — returns a data URL JPEG of the viewport
+- `agent_send_view_image` — captures viewport and attaches image to conversation (optionally triggers response)
+- `agent_set_view` — move the viewport camera to specified bounds
+- `agent_get_text_context` — return visible texts from shapes in the viewport
 
 IDE and Notes:
 

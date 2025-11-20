@@ -264,3 +264,5 @@ Realtime Console
 Check out the WebRTC Realtime API in this light weight example app.
 
 ](https://github.com/openai/openai-realtime-console/)
+
+Was this page useful?

@@ -1,6 +1,6 @@
 # Docs Verification Checklist
 
-Last verified: 2025-10-19
+Last verified: 2025-01-27
 
 This file maps each doc in `docs/` to concrete code paths it describes. Update both the doc and this checklist together.
 
@@ -22,16 +22,21 @@ This file maps each doc in `docs/` to concrete code paths it describes. Update b
   - `app/test-app/services/context/index.ts` (preferred combined sender)
   - `app/test-app/services/autoContext.ts` (legacy fallback)
 - Backend
-  - `convex/http.ts` — `OPTIONS|GET /realtime/token`
+  - `convex/schema.ts` — database schema (users table)
+  - `convex/users.ts` — user queries/mutations for Clerk integration
+  - `convex/http.ts` — `OPTIONS|GET /realtime/token`, `POST /clerk-users-webhook`
   - `convex/realtime.ts` — `internal.realtime.mintClientSecret`
 - tldraw v4.0.2
   - Geo labels are not set inline; `agent_label` creates a separate text shape
   - Unsupported geo names normalized; allowed list in `agent/tools/whiteboard.ts`
 
 ## convex.md → code
-- Endpoints: `convex/http.ts` CORS + `GET /realtime/token`
+- Schema: `convex/schema.ts` defines `users` table (Clerk sync), indexed by `by_clerk_id`
+- Functions: `convex/users.ts` — `currentUser`, `userLoginStatus`, `getUser`, `updateOrCreateUser`, `deleteUser`
+- Endpoints: `convex/http.ts` — CORS + `GET /realtime/token`, `POST /clerk-users-webhook`
 - Internal action: `convex/realtime.ts` (defaults: model `gpt-realtime`, voice `marin`)
-- Env vars: `OPENAI_API_KEY`, `CLIENT_ORIGIN`, `NEXT_PUBLIC_CONVEX_SITE_URL`, `NEXT_PUBLIC_CONVEX_URL`
+- Env vars: `OPENAI_API_KEY` (required), `CLERK_WEBHOOK_SECRET` (required), `CLIENT_ORIGIN` (optional), `CLERK_JWT_ISSUER_DOMAIN` (optional)
+- Next.js env vars: `NEXT_PUBLIC_CONVEX_SITE_URL`, `NEXT_PUBLIC_CONVEX_URL`
 - Client fetch logic aligns with `app/test-app/page.tsx` (`fetchEphemeralToken`)
 
 ## realtime-agent.md → code

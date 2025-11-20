@@ -1,6 +1,13 @@
 # Test App (`/test-app`)
 
-The prototype centers on `app/test-app/page.tsx` with extracted components and modular agent files. It brings together:
+The prototype centers on `app/test-app/page.tsx` with extracted components and modular agent files. It brings together a realtime voice tutor, interactive whiteboard, IDE workspace, and YAML-driven lesson system.
+
+**Related docs:**
+- [Realtime Agent](realtime-agent.md) — Agent session and tools
+- [Architecture Overview](architecture.md) — System architecture
+- [IDE Tools](ide.md) — IDE capabilities
+- [Notes System](notes.md) — YAML lesson system
+- [Troubleshooting](troubleshooting.md) — Common issues
 
 - A tldraw whiteboard
 - A full-page IDE workspace using Monaco editor with language selection; Python executes via Pyodide
@@ -31,23 +38,31 @@ The prototype centers on `app/test-app/page.tsx` with extracted components and m
  - Dev Controls: select microphone/speaker devices, adjust VAD eagerness, toggle push‑to‑talk, and play a test tone.
  - Save: export a `log.json` with per‑turn transcripts, context sizes, image lengths, and tool calls.
 
-## How the agent “sees” the board
+## How the Agent "Sees" the Board
 
-The page periodically sends:
+The page automatically sends context before each agent response:
 
-- `view_context` — a compact JSON summary of visible shapes and selections
-- `input_image` — a viewport-bounded screenshot as a data URL
+1. **`workspace_context` JSON** — Compact summary of:
+   - Whiteboard: bounds, visible shapes, selections
+   - IDE: active file name, language, content
+   - Notes: full YAML document
 
-- Combined sender: both parts are typically posted together in a single message with basic deduplication and a short debounce (~120ms) before triggering `response.create`.
-- Implementation specifics (current):
-  - Debounce before `response.create`: ~120ms to ensure the data channel delivers context first.
-  - Dedup window: ~300ms to skip resending when both JSON and image are unchanged.
-  - Screenshot is omitted when no shapes are visible in the viewport.
+2. **`input_image`** — Viewport-bounded JPEG screenshot (only when shapes are visible)
 
-Notes on tldraw v4.0.2 compatibility:
-- Text shapes must be created with `props.richText` (use `toRichText('...')`). Using `props.text` or `props.label` on `type: 'text'` will fail validation.
-- Geo shape text content should also use `props.richText`; avoid `label`. The app avoids inline geo text where unsupported and instead places a nearby text label when needed.
-- Unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback `rectangle`).
+**Implementation:**
+- Combined sender posts both in a single `conversation.item.create` message
+- Deduplication: ~300ms window skips resending if both JSON and image unchanged
+- Debounce: ~120ms delay before `response.create` to ensure context is delivered
+- Screenshot omitted when no shapes are visible
+
+See [Realtime Agent](realtime-agent.md#auto-context-strategy) for details.
+
+**tldraw v4.0.2 Compatibility Notes:**
+- Text shapes require `props.richText` (use `toRichText('...')`). Using `props.text` or `props.label` on `type: 'text'` will fail validation
+- Geo shapes: Inline text is disabled; use `agent_label` to create a nearby text shape instead
+- Unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback → `rectangle`)
+
+See [Troubleshooting](troubleshooting.md#tldraw-validation-errors-unexpected-property--value) for validation error fixes.
 
 Whiteboard text tools:
 - `agent_create_text(x, y, text, w?, h?, color?)` — creates a standalone text shape at the given coordinates. Prefer this for adding text; use `agent_label(shapeId, text)` to place a text label near an existing non‑text shape.
@@ -63,19 +78,25 @@ IDE tools (Single-file Python):
 
 The agent uses these to reason about layout without expensive OCR.
 
-## Tools: registry, approvals, and telemetry
+## Tools: Registry, Approvals, and Telemetry
 
-- Tool registry: `agent/registry.ts` bundles tools from whiteboard, IDE, and notes into a single list which is registered with the Realtime agent.
-- Telemetry: Every tool execution is wrapped by `createWrapExecute` to emit:
-  - start/done/error events with a request id (rid) and duration (ms)
-  - a visible busy indicator in the UI (“Running tool…”) via `setToolBusy`
-  - structured logs like `[tool:start]`, `[tool:done]`, and `[tool:error]`
-- Approvals: Destructive actions require confirmation.
-  - `agent_clear` requests approval first and returns `approval_required` until the UI confirms; no clearing occurs by default.
-  - The UI can listen for an approval event (with `rid: "approval"`) and display a confirmation dialog before re-dispatching.
-- Labels/text:
-  - Inline labels on geo shapes are avoided for tldraw v4.0.2 compatibility; `agent_label` creates a nearby text shape instead of mutating the geo.
-  - For standalone text, use `agent_create_text(x, y, text, ...)`.
+**Tool Registry:** `agent/registry.ts` bundles tools from whiteboard, IDE, and notes into a single list registered with the Realtime agent.
+
+**Telemetry:** Every tool execution is wrapped by `createWrapExecute` to emit:
+- Start/done/error events with request ID (rid) and duration (ms)
+- Visible busy indicator in UI ("Running tool…") via `setToolBusy`
+- Structured logs: `[tool:start]`, `[tool:done]`, `[tool:error]`
+
+**Approvals:** Destructive actions require confirmation:
+- `agent_clear` requests approval first and returns `approval_required` until UI confirms
+- UI listens for approval event (`rid: "approval"`) and displays confirmation dialog (`ToolApprovalDialog`) before re-dispatching
+
+**Text/Labels:**
+- Inline labels on geo shapes are avoided for tldraw v4.0.2 compatibility
+- `agent_label` creates a nearby text shape instead of mutating the geo
+- For standalone text, use `agent_create_text(x, y, text, ...)`
+
+See [Realtime Agent](realtime-agent.md#tools) for complete tool reference.
 
 ## Caveats
 

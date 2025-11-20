@@ -1,50 +1,70 @@
-# Convex backend
+# Convex Backend
 
-This app uses Convex for storage, queries/mutations, HTTP endpoints, and actions.
+This app uses Convex for storage, queries/mutations, HTTP endpoints, and actions. The backend handles user authentication via Clerk webhooks and provides an endpoint for minting OpenAI Realtime API client secrets.
+
+See also: [Architecture Overview](architecture.md) for system-wide context.
 
 ## Schema
 
-`convex/schema.ts` defines a simple `numbers` table for the starter UI. Extend this file as your app grows.
+`convex/schema.ts` defines the database schema. Currently, it includes:
+
+- `users` table: Stores Clerk user data synced via webhook
+  - Indexed by `by_clerk_id` on `clerkUser.id`
+  - Used for authentication and user management
+
+The schema is optional—Convex works without it, but it provides better TypeScript types and validation.
 
 ## Functions
 
-- `convex/myFunctions.ts`
-  - `listNumbers` (query): returns the most recent numbers and the current viewer name
-  - `addNumber` (mutation): inserts a new number
-  - `myAction` (action): example of calling queries/mutations from an action
+- `convex/users.ts`
+  - `currentUser` (query): Get the current authenticated user
+  - `userLoginStatus` (query): Check login status (returns status tuple)
+  - `getUser` (internal query): Get user by Clerk ID
+  - `updateOrCreateUser` (internal mutation): Create or update user from Clerk webhook
+  - `deleteUser` (internal mutation): Delete user by Clerk ID
 
-## Realtime token minting
+## HTTP Routes
 
 - `convex/http.ts`
-  - `OPTIONS /realtime/token` — preflight with CORS
-  - `GET /realtime/token` — returns `{ value: string }` ephemeral secret
+  - `POST /clerk-users-webhook` — Clerk webhook handler for user sync
+  - `OPTIONS /realtime/token` — CORS preflight
+  - `GET /realtime/token` — Returns `{ value: string }` ephemeral OpenAI client secret
     - Internally calls `internal.realtime.mintClientSecret`
-    - Default session params used by the action: `model: "gpt-realtime"`, `voice: "marin"`
-    - Optional auth gate: uncomment identity checks if you want to require a signed-in user
+    - Default session params: `model: "gpt-realtime"`, `voice: "marin"`
+    - Optional auth gate: uncomment identity checks to require signed-in user
+
+## Realtime Token Minting
 
 - `convex/realtime.ts`
   - `internalAction mintClientSecret({ model?, voice? })`
-  - Reads `OPENAI_API_KEY` from Convex env vars
+  - Reads `OPENAI_API_KEY` from Convex environment variables
   - POSTs to `https://api.openai.com/v1/realtime/client_secrets`
+  - Returns `{ value: "ek_..." }` ephemeral client secret
 
-## Environment variables
+## Environment Variables
 
 Configure in the Convex Dashboard → Settings → Environment Variables:
 
-- `OPENAI_API_KEY` — required for `mintClientSecret`
-- `CLIENT_ORIGIN` — optional CORS allowlist for `/realtime/token`
-- `CLERK_JWT_ISSUER_DOMAIN` — optional, if enabling Clerk auth in Convex
-- `NEXT_PUBLIC_CONVEX_SITE_URL` — preferred in the Next.js app to fetch `/realtime/token` (client-side)
-- `NEXT_PUBLIC_CONVEX_URL` — optional; if set, the client derives the Site URL by replacing `convex.cloud` → `convex.site`
+**Required:**
+- `OPENAI_API_KEY` — Required for `mintClientSecret` to generate ephemeral client secrets
+- `CLERK_WEBHOOK_SECRET` — Required for Clerk webhook verification (`/clerk-users-webhook`)
 
-## Calling from the client
+**Optional:**
+- `CLIENT_ORIGIN` — CORS allowlist for `/realtime/token` (defaults to `*` in dev)
+- `CLERK_JWT_ISSUER_DOMAIN` — If enabling Clerk auth in Convex functions
 
-The test page fetches the token directly from the Convex site domain. It prefers `NEXT_PUBLIC_CONVEX_SITE_URL`, with a fallback that derives the Site URL from `NEXT_PUBLIC_CONVEX_URL` by swapping the domain.
+**Next.js Environment Variables** (set in `.env.local`):
+- `NEXT_PUBLIC_CONVEX_SITE_URL` — Preferred base URL for fetching `/realtime/token` (client-side)
+- `NEXT_PUBLIC_CONVEX_URL` — Alternative; client derives Site URL by replacing `convex.cloud` → `convex.site`
 
-- Base URL taken from `NEXT_PUBLIC_CONVEX_SITE_URL`
-- Path: `/realtime/token`
+## Client Integration
 
-Example (simplified):
+The test page (`app/test-app/page.tsx`) fetches the ephemeral token directly from the Convex site domain. It prefers `NEXT_PUBLIC_CONVEX_SITE_URL`, with a fallback that derives the Site URL from `NEXT_PUBLIC_CONVEX_URL` by swapping the domain.
+
+**Endpoint:** `GET /realtime/token`  
+**Base URL:** From `NEXT_PUBLIC_CONVEX_SITE_URL` or derived from `NEXT_PUBLIC_CONVEX_URL`
+
+Example implementation:
 
 ```ts
 const deriveSiteFromCloud = (cloudUrl?: string) => {

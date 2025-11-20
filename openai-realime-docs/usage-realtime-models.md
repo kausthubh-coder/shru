@@ -452,7 +452,10 @@ This guide is long but not exhaustive! For more in a specific area, see the foll
 *   [Inputs and outputs](/docs/guides/realtime-inputs-outputs): Text and audio input requirements and output options
 *   [Managing conversations](/docs/guides/realtime-conversations): Learn to manage a conversation for the duration of a realtime session
 *   [Webhooks and server-side controls](/docs/guides/realtime-server-controls): Create a sideband channel to separate sensitive server-side logic from an untrusted client
+*   [Managing costs](/docs/guides/realtime-costs): Understand how costs are calculated and strategies to optimize them
 *   [Function calling](/docs/guides/realtime-function-calling): How to call functions in your realtime app
 *   [MCP servers](/docs/guides/realtime-mcp): How to use MCP servers to access additional tools in realtime apps
 *   [Realtime transcription](/docs/guides/realtime-transcription): How to transcribe audio with the Realtime API
 *   [Voice agents](https://openai.github.io/openai-agents-js/guides/voice-agents/quickstart/): A quickstart for building a voice agent with the Agents SDK
+
+Was this page useful?

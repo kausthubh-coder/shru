@@ -73,6 +73,7 @@ Once connected to a realtime model using one of the methods above, learn how to 
 *   **[Prompting guide](/docs/guides/realtime-models-prompting):** learn tips and best practices for prompting and steering Realtime models.
 *   **[Managing conversations](/docs/guides/realtime-conversations):** Learn about the Realtime session lifecycle and the key events that happen during a conversation.
 *   **[Webhooks and server-side controls](/docs/guides/realtime-server-controls):** Learn how you can control a Realtime session on the server to call tools and implement guardrails.
+*   **[Managing costs](/docs/guides/realtime-costs):** Learn how to monitor and optimize your usage of the Realtime API.
 *   **[Realtime audio transcription](/docs/guides/realtime-transcription):** Transcribe audio streams in real time over a WebSocket connection.
 
 Beta to GA migration

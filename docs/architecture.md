@@ -2,6 +2,11 @@
 
 This project combines Next.js (App Router), Convex, Clerk, and OpenAI Realtime into a single experience. The production app scaffolding is in place while the realtime tutor prototype runs in `app/test-app/page.tsx`.
 
+**Related docs:**
+- [Convex Backend](convex.md) — Backend functions, schema, and HTTP routes
+- [Realtime Agent](realtime-agent.md) — Agent session setup and tools
+- [Test App Guide](test-app.md) — How to use the prototype
+
 ## High-level diagram
 
 Client (Next.js App)
@@ -31,10 +36,10 @@ Client (Next.js App)
   └─ Standard pages (`/`, `/server`, etc.)
 
 Convex Backend (`convex/`)
-  ├─ `myFunctions.ts` — example query/mutation
-  ├─ `http.ts` — HTTP routes, including `/realtime/token`
-  ├─ `realtime.ts` — internal action to mint OpenAI client secrets
-  └─ `schema.ts` — database schema
+  ├─ `schema.ts` — database schema (users table for Clerk sync)
+  ├─ `users.ts` — user queries/mutations for Clerk integration
+  ├─ `http.ts` — HTTP routes (`/realtime/token`, `/clerk-users-webhook`)
+  └─ `realtime.ts` — internal action to mint OpenAI client secrets
 
 OpenAI
   └─ Realtime API used to create ephemeral client secrets and run the agent
@@ -50,9 +55,10 @@ OpenAI
    - Code runs in a full‑page IDE; Python executes client‑side via Pyodide (loader in `app/test-app/lib/pyodide.ts`).
 
 4) The page streams auto‑context to the agent: a compact JSON summary of the viewport + an image snapshot. By default a combined sender dispatches both in a single message with basic dedup/throttling; it falls back to the legacy two‑message flow on failure. The agent reasons over those inputs and calls tools as needed.
-5) A debug layer exposes “Show Context” (the last JSON + image sent) and “Show Calls” (structured tool events) for troubleshooting.
 
-5) Regular app pages (`/`, `/server`) demonstrate conventional Convex patterns (queries/mutations, server preloading), independent of the prototype.
+5) A debug layer exposes "Show Context" (the last JSON + image sent) and "Show Calls" (structured tool events) for troubleshooting.
+
+6) Regular app pages (`/`, `/server`) demonstrate conventional Convex patterns (queries/mutations, server preloading), independent of the prototype.
 
 ## Auth
 
@@ -70,17 +76,19 @@ OpenAI
 - `app/test-app/agent/tools/*` — modularized tool definitions (whiteboard, IDE, notes)
 - `app/test-app/agent/registry.ts` — central builder for all tools
 - `app/test-app/types/toolContracts.ts` — shared tool contracts, runtime bridges, and logging wrapper
-- `convex/http.ts` — CORS + `/realtime/token` endpoint
+- `convex/schema.ts` — database schema definition
+- `convex/users.ts` — user management (Clerk integration)
+- `convex/http.ts` — HTTP routes (CORS + `/realtime/token`, `/clerk-users-webhook`)
 - `convex/realtime.ts` — action that POSTs to OpenAI to mint ephemeral client secrets
-- `convex/myFunctions.ts` — example functions (`listNumbers`, `addNumber`)
 - `components/ConvexClientProvider.tsx` — Convex React provider setup
 
 ## Extending
 
 - Add new Convex tables in `convex/schema.ts`
-- Create new queries/mutations/actions in `convex/*.ts`
-- Tighten `/realtime/token` auth, rate limit by user, and add logging/analytics
+- Create new queries/mutations/actions in `convex/*.ts` files
+- Tighten `/realtime/token` auth (uncomment identity checks in `convex/http.ts`), add rate limiting per user, and add logging/analytics
 - Split the prototype into modular components as functionality stabilizes
+- Extend the `users` table schema if you need additional user fields beyond Clerk data
 
 ## Recent changes (voice agent internals)
 
