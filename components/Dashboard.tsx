@@ -101,7 +101,9 @@ export default function Dashboard() {
             <button
               type="submit"
               disabled={
-                isCreating || !newSessionName.trim() || selectedSpaces.length === 0
+                isCreating ||
+                !newSessionName.trim() ||
+                selectedSpaces.length === 0
               }
               className="w-full py-3 px-4 bg-[#1A1A1A] text-[#F2F1EA] rounded-lg font-medium hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center"
             >
@@ -154,5 +156,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
-

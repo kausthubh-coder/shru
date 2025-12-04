@@ -54,7 +54,7 @@ export default function SessionPage() {
         </div>
       </header>
       <div className="flex-1 relative overflow-hidden">
-        <SessionWorkspace enabledTools={enabledTools} />
+        <SessionWorkspace sessionId={sessionId} enabledTools={enabledTools} />
       </div>
     </div>
   );

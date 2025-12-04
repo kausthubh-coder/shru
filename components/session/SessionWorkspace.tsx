@@ -5,11 +5,17 @@ import dynamic from "next/dynamic";
 import { Tldraw } from "tldraw";
 import { toRichText } from "@tldraw/tlschema";
 import "tldraw/tldraw.css";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { Id } from "@/convex/_generated/dataModel";
 // Local minimal helpers to avoid missing agent/shared imports
 import { AIVoiceAgentPanel } from "./AIVoiceAgentPanel";
 import { loadPyodideOnce } from "@/lib/pyodide";
 import { buildTutorInstructions as buildPersonaInstructions } from "@/lib/prompts/tutor";
-import { getViewContext as computeViewContext, getViewportScreenshot } from "@/lib/viewContext";
+import {
+  getViewContext as computeViewContext,
+  getViewportScreenshot,
+} from "@/lib/viewContext";
 import { sendAutoContext as sendAutoContextService } from "./services/autoContext";
 import { sendAutoContext as sendAutoContextCombined } from "./services/context";
 import { buildAllTools } from "./agent/registry";
@@ -18,7 +24,25 @@ import { createRealtimeSessionHandle } from "./agent/session";
 import { buildRuntime } from "./agent/runtime";
 import { NotesEditor } from "@/components/lesson/NotesEditor";
 import { NotesRenderer } from "@/components/lesson/NotesRenderer";
-import { serializeNotesYaml, NotesDocT, parseNotesYaml } from "@/types/notesYaml";
+import {
+  serializeNotesYaml,
+  NotesDocT,
+  parseNotesYaml,
+} from "@/types/notesYaml";
+
+const DEFAULT_IDE_FILE = {
+  name: "main.py",
+  language: "python",
+  content: "# Welcome to the workspace\nprint('Hello from the IDE tab')\n",
+};
+
+const DEFAULT_NOTES_DOC: NotesDocT = {
+  title: "Notes",
+  version: 1,
+  blocks: [{ type: "text", md: "Write here…" } as any],
+};
+
+const DEFAULT_NOTES_YAML = serializeNotesYaml(DEFAULT_NOTES_DOC);
 
 // Dynamically load Monaco on client only
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
@@ -27,12 +51,15 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
 
 
 export default function SessionWorkspace({
+  sessionId,
   enabledTools = ["whiteboard", "code", "notes"],
 }: {
+  sessionId: Id<"sessions">;
   enabledTools?: ("whiteboard" | "code" | "notes")[];
 }) {
   const editorRef = useRef<any>(null);
   const agentRef = useRef<any>(null);
+  const [editorReady, setEditorReady] = useState(false);
 
   // Voice agent/session state
   const sessionRef = useRef<any>(null);
@@ -63,6 +90,98 @@ export default function SessionWorkspace({
   const [selectedOutputId, setSelectedOutputId] = useState<string>("");
   const [pushToTalk, setPushToTalk] = useState<boolean>(false);
   const [vadEagerness, setVadEagerness] = useState<'low'|'medium'|'high'>('medium');
+  const pendingWhiteboardSnapshotRef = useRef<any>(null);
+  const whiteboardSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSyncedWhiteboardHash = useRef<string | null>(null);
+  const whiteboardUnsubscribeRef = useRef<(() => void) | null>(null);
+  const ideLastServerHash = useRef<string | null>(null);
+  const ideSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notesLastServerHash = useRef<string | null>(null);
+  const notesSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const hasWhiteboard = enabledTools.includes("whiteboard");
+  const hasCode = enabledTools.includes("code");
+  const hasNotes = enabledTools.includes("notes");
+
+  const whiteboardDoc = useQuery(
+    api.spaces.getWhiteboard,
+    hasWhiteboard ? { sessionId } : "skip",
+  );
+  const ideDoc = useQuery(
+    api.spaces.getIde,
+    hasCode ? { sessionId } : "skip",
+  );
+  const lessonDoc = useQuery(
+    api.spaces.getLesson,
+    hasNotes ? { sessionId } : "skip",
+  );
+  const whiteboardSchemaVersion = whiteboardDoc?.schemaVersion;
+
+  const updateWhiteboardMutation = useMutation(api.spaces.updateWhiteboard);
+  const updateIdeMutation = useMutation(api.spaces.updateIde);
+  const updateLessonMutation = useMutation(api.spaces.updateLesson);
+  const [whiteboardHydrated, setWhiteboardHydrated] = useState(!hasWhiteboard);
+  const [ideHydrated, setIdeHydrated] = useState(!hasCode);
+  const [lessonHydrated, setLessonHydrated] = useState(!hasNotes);
+
+  useEffect(() => {
+    if (!hasWhiteboard) {
+      setWhiteboardHydrated(true);
+    }
+    if (!hasCode) {
+      setIdeHydrated(true);
+    }
+    if (!hasNotes) {
+      setLessonHydrated(true);
+    }
+  }, [hasWhiteboard, hasCode, hasNotes]);
+
+  useEffect(() => {
+    if (!hasCode) return;
+    if (ideDoc === undefined) return;
+    const rawFiles = Array.isArray(ideDoc?.files) ? ideDoc?.files : [];
+    const serverFiles =
+      rawFiles.length > 0 ? rawFiles : [DEFAULT_IDE_FILE];
+    const nextFiles: Array<IdeFile> = serverFiles.map(
+      (file: { name?: string; language?: string; content?: string }, idx: number) => ({
+      id: `${file.name || "file"}-${idx}-${sessionId}`,
+      name: file.name || `file-${idx + 1}.py`,
+      language: file.language || "python",
+      content: file.content ?? "",
+      }),
+    );
+    const activeName =
+      (ideDoc?.activeFile &&
+        nextFiles.some((f) => f.name === ideDoc.activeFile) &&
+        ideDoc.activeFile) ||
+      nextFiles[0]?.name ||
+      DEFAULT_IDE_FILE.name;
+    const activeId =
+      nextFiles.find((f) => f.name === activeName)?.id ??
+      nextFiles[0]?.id ??
+      "file-1";
+    setFiles(nextFiles);
+    setActiveFileId(activeId);
+    ideLastServerHash.current = hashString(
+      JSON.stringify({
+        files: serverFiles,
+        activeFile: activeName,
+      }),
+    );
+    setIdeHydrated(true);
+  }, [ideDoc, hasCode, sessionId]);
+
+  useEffect(() => {
+    if (!hasNotes) return;
+    if (lessonDoc === undefined) return;
+    const yaml =
+      typeof lessonDoc?.yaml === "string" && lessonDoc.yaml.length > 0
+        ? lessonDoc.yaml
+        : DEFAULT_NOTES_YAML;
+    notesLastServerHash.current = hashString(yaml);
+    setNotesYaml(yaml);
+    setLessonHydrated(true);
+  }, [lessonDoc, hasNotes]);
 
   // Workspace UI state
   const [activeTab, setActiveTab] = useState<"whiteboard" | "code" | "notes">(
@@ -128,14 +247,96 @@ export default function SessionWorkspace({
     } catch {}
   }, [refreshDevices]);
 
+  useEffect(() => {
+    if (!hasWhiteboard) return;
+    if (whiteboardDoc === undefined) return;
+    setWhiteboardHydrated(true);
+    const snapshot = whiteboardDoc?.snapshot ?? null;
+    const hash = snapshotHash(snapshot);
+    lastSyncedWhiteboardHash.current = hash;
+    if (!snapshot || !editorRef.current) return;
+    try {
+      if (typeof editorRef.current.loadSnapshot === "function") {
+        editorRef.current.loadSnapshot(snapshot);
+      } else if (editorRef.current.store?.loadSnapshot) {
+        editorRef.current.store.loadSnapshot(snapshot);
+      }
+    } catch (err) {
+      console.error("Failed to load whiteboard snapshot", err);
+    }
+  }, [whiteboardDoc, hasWhiteboard]);
+
+  useEffect(() => {
+    if (!hasWhiteboard || !editorReady) return;
+    const editor = editorRef.current;
+    if (!editor || !editor.store?.listen) return;
+    const unsubscribe = editor.store.listen(
+      () => {
+        if (!whiteboardHydrated) return;
+        try {
+          const snap =
+            editor.getSnapshot?.() ??
+            editor.store?.getSnapshot?.() ??
+            null;
+          if (!snap) return;
+          pendingWhiteboardSnapshotRef.current = snap;
+          if (!whiteboardSaveTimeoutRef.current) {
+            whiteboardSaveTimeoutRef.current = setTimeout(async () => {
+              if (!pendingWhiteboardSnapshotRef.current) return;
+              const snapshot = pendingWhiteboardSnapshotRef.current;
+              pendingWhiteboardSnapshotRef.current = null;
+              whiteboardSaveTimeoutRef.current = null;
+              const hash = snapshotHash(snapshot);
+              if (!hash || hash === lastSyncedWhiteboardHash.current) return;
+              try {
+                await updateWhiteboardMutation({
+                  sessionId,
+                  snapshot,
+                  schemaVersion: whiteboardSchemaVersion,
+                });
+                lastSyncedWhiteboardHash.current = hash;
+              } catch (err: any) {
+                appendLog(`whiteboard save error: ${String(err?.message ?? err)}`);
+              }
+            }, 800);
+          }
+        } catch (err: any) {
+          appendLog(
+            `whiteboard snapshot error: ${String(err?.message ?? err)}`,
+          );
+        }
+      },
+      { scope: "document", source: "user" },
+    );
+    whiteboardUnsubscribeRef.current = () => {
+      try {
+        unsubscribe?.();
+      } catch {}
+    };
+    return () => {
+      if (whiteboardUnsubscribeRef.current) {
+        try {
+          whiteboardUnsubscribeRef.current();
+        } catch {}
+        whiteboardUnsubscribeRef.current = null;
+      }
+    };
+  }, [
+    hasWhiteboard,
+    editorReady,
+    whiteboardHydrated,
+    updateWhiteboardMutation,
+    sessionId,
+    whiteboardSchemaVersion,
+    appendLog,
+  ]);
+
   // Simple in-memory IDE workspace
   type IdeFile = { id: string; name: string; language: string; content: string };
   const [files, setFiles] = useState<Array<IdeFile>>([
     {
       id: "file-1",
-      name: "main.py",
-      language: "python",
-      content: "# Welcome to the workspace\nprint('Hello from the IDE tab')\n",
+      ...DEFAULT_IDE_FILE,
     },
   ]);
   const [activeFileId, setActiveFileId] = useState<string>("file-1");
@@ -159,14 +360,7 @@ export default function SessionWorkspace({
   }, [activeFile]);
 
   // Notes YAML document
-  const initialYaml: NotesDocT = {
-    title: "Notes",
-    version: 1,
-    blocks: [
-      { type: 'text', md: 'Write here…' } as any,
-    ],
-  };
-  const [notesYaml, setNotesYaml] = useState<string>(() => serializeNotesYaml(initialYaml));
+  const [notesYaml, setNotesYaml] = useState<string>(DEFAULT_NOTES_YAML);
   const [showYaml, setShowYaml] = useState<boolean>(false);
 
   const randomId = useCallback(() => Math.random().toString(36).slice(2), []);
@@ -334,27 +528,47 @@ export default function SessionWorkspace({
     return await getViewportScreenshot(editorRef.current);
   }, []);
 
+  const flushWhiteboardSave = useCallback(async () => {
+    if (!hasWhiteboard || !whiteboardHydrated) return;
+    if (!pendingWhiteboardSnapshotRef.current) return;
+    const snapshot = pendingWhiteboardSnapshotRef.current;
+    pendingWhiteboardSnapshotRef.current = null;
+    if (whiteboardSaveTimeoutRef.current) {
+      clearTimeout(whiteboardSaveTimeoutRef.current);
+      whiteboardSaveTimeoutRef.current = null;
+    }
+    const hash = snapshotHash(snapshot);
+    if (!hash || hash === lastSyncedWhiteboardHash.current) return;
+    try {
+      await updateWhiteboardMutation({
+        sessionId,
+        snapshot,
+        schemaVersion: whiteboardSchemaVersion,
+      });
+      lastSyncedWhiteboardHash.current = hash;
+    } catch (err: any) {
+      appendLog(`whiteboard save error: ${String(err?.message ?? err)}`);
+    }
+  }, [
+    hasWhiteboard,
+    whiteboardHydrated,
+    updateWhiteboardMutation,
+    sessionId,
+    whiteboardSchemaVersion,
+    appendLog,
+  ]);
+
   const fetchEphemeralToken = useCallback(async () => {
-    // Accept NEXT_PUBLIC_CONVEX_SITE_URL or derive from NEXT_PUBLIC_CONVEX_URL by replacing convex.cloud → convex.site
-    const deriveSiteFromCloud = (cloudUrl: string | undefined): string | null => {
-      if (!cloudUrl) return null;
-      try {
-        const u = new URL(cloudUrl);
-        const host = u.host.replace("convex.cloud", "convex.site");
-        return `${u.protocol}//${host}`;
-      } catch {
-        return null;
-      }
-    };
-    const siteBase = (process.env.NEXT_PUBLIC_CONVEX_SITE_URL as string | undefined) || deriveSiteFromCloud(process.env.NEXT_PUBLIC_CONVEX_URL as string | undefined);
-    if (!siteBase) throw new Error("Convex site URL is not configured. Set NEXT_PUBLIC_CONVEX_SITE_URL or NEXT_PUBLIC_CONVEX_URL.");
     if (tokenPromiseRef.current) return await tokenPromiseRef.current;
     tokenPromiseRef.current = (async () => {
-      const url = `${siteBase.replace(/\/$/, "")}/realtime/token`;
-      const res = await fetch(url, { method: "GET" });
-      if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`);
+      const res = await fetch("/api/realtime/token", { method: "GET" });
+      if (!res.ok) {
+        throw new Error(`Token fetch failed: ${res.status}`);
+      }
       const data = await res.json();
-      if (!data?.value) throw new Error("Invalid token response");
+      if (!data?.value) {
+        throw new Error("Invalid token response");
+      }
       return data.value as string;
     })();
     try {
@@ -848,6 +1062,93 @@ export default function SessionWorkspace({
     }
   }, [muted]);
 
+  useEffect(() => {
+    if (!hasCode || !ideHydrated) return;
+    const activeFileName =
+      files.find((f) => f.id === activeFileId)?.name ??
+      files[0]?.name ??
+      DEFAULT_IDE_FILE.name;
+    const payload = {
+      files: files.map((f) => ({
+        name: f.name || DEFAULT_IDE_FILE.name,
+        language: f.language || DEFAULT_IDE_FILE.language,
+        content: f.content ?? "",
+      })),
+      activeFile: activeFileName,
+    };
+    const hash = hashString(JSON.stringify(payload));
+    if (!hash || hash === ideLastServerHash.current) return;
+    if (ideSaveTimeoutRef.current) {
+      clearTimeout(ideSaveTimeoutRef.current);
+    }
+    ideSaveTimeoutRef.current = setTimeout(async () => {
+      ideSaveTimeoutRef.current = null;
+      try {
+        await updateIdeMutation({
+          sessionId,
+          files: payload.files,
+          activeFile: payload.activeFile,
+        });
+        ideLastServerHash.current = hash;
+      } catch (err: any) {
+        appendLog(`ide save error: ${String(err?.message ?? err)}`);
+      }
+    }, 800);
+  }, [
+    files,
+    activeFileId,
+    hasCode,
+    ideHydrated,
+    updateIdeMutation,
+    sessionId,
+    appendLog,
+  ]);
+
+  useEffect(() => {
+    if (!hasNotes || !lessonHydrated) return;
+    const hash = hashString(notesYaml);
+    if (!hash || hash === notesLastServerHash.current) return;
+    if (notesSaveTimeoutRef.current) {
+      clearTimeout(notesSaveTimeoutRef.current);
+    }
+    notesSaveTimeoutRef.current = setTimeout(async () => {
+      notesSaveTimeoutRef.current = null;
+      try {
+        await updateLessonMutation({ sessionId, yaml: notesYaml });
+        notesLastServerHash.current = hash;
+      } catch (err: any) {
+        appendLog(`lesson save error: ${String(err?.message ?? err)}`);
+      }
+    }, 800);
+  }, [
+    notesYaml,
+    hasNotes,
+    lessonHydrated,
+    updateLessonMutation,
+    sessionId,
+    appendLog,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (whiteboardSaveTimeoutRef.current) {
+        clearTimeout(whiteboardSaveTimeoutRef.current);
+      }
+      if (ideSaveTimeoutRef.current) {
+        clearTimeout(ideSaveTimeoutRef.current);
+      }
+      if (notesSaveTimeoutRef.current) {
+        clearTimeout(notesSaveTimeoutRef.current);
+      }
+      if (whiteboardUnsubscribeRef.current) {
+        try {
+          whiteboardUnsubscribeRef.current();
+        } catch {}
+        whiteboardUnsubscribeRef.current = null;
+      }
+    };
+  }, []);
+
   return (
     <main className="relative h-full w-full bg-gradient-to-b from-slate-100/70 to-slate-200/70 dark:from-slate-900/80 dark:to-slate-950/80 flex flex-col overflow-hidden">
       {/* Workspace layer */}
@@ -856,7 +1157,12 @@ export default function SessionWorkspace({
         {activeTab === "whiteboard" && enabledTools.includes("whiteboard") && (
           <div className="relative w-full h-full">
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-          <Tldraw onMount={(editor) => { editorRef.current = editor; }} />
+          <Tldraw
+            onMount={(editor) => {
+              editorRef.current = editor;
+              setEditorReady(true);
+            }}
+          />
         </div>
         {(() => {
           if (editorRef.current && !agentRef.current) {
@@ -1204,6 +1510,25 @@ export default function SessionWorkspace({
       <audio ref={audioRef} autoPlay playsInline className="w-0 h-0 absolute" />
     </main>
   );
+}
+
+function hashString(input: string | null | undefined): string | null {
+  if (typeof input !== "string") return null;
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    const chr = input.charCodeAt(i);
+    hash = (hash << 5) - hash + chr;
+    hash |= 0;
+  }
+  return hash.toString(36);
+}
+
+function snapshotHash(snapshot: any): string | null {
+  try {
+    return hashString(JSON.stringify(snapshot ?? null));
+  } catch {
+    return null;
+  }
 }
 
 

@@ -33,7 +33,7 @@ export default defineSchema({
     sessionId: v.id("sessions"),
     files: v.array(
       v.object({
-        name: v.string(),
+    name: v.string(),
         language: v.string(),
         content: v.string(),
       }),

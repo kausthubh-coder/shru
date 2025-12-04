@@ -1,8 +1,9 @@
 "use client";
 
 import { Authenticated, Unauthenticated, AuthLoading } from "convex/react";
-import { SignInButton, UserButton, Waitlist} from "@clerk/nextjs";
+import { SignInButton, UserButton } from "@clerk/nextjs";
 import Dashboard from "@/components/Dashboard";
+import Waitlist from "@/components/Waitlist";
 
 export default function Home() {
   return (
@@ -149,7 +150,6 @@ export default function Home() {
               Enhance your education with Studi&apos;s AI-Powered Education platform
             </p>
 
-            {/* Waitlist Card */}
             <div className="relative z-10">
               <Waitlist />
             </div>

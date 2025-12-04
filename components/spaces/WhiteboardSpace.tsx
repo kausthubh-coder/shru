@@ -59,7 +59,7 @@ export default function WhiteboardSpace({
         pendingSnapshotRef.current = getSnapshot(editor.store);
         if (saveTimeoutRef.current) {
             return;
-        }
+            }
         saveTimeoutRef.current = setTimeout(() => {
             flushPendingSave();
         }, 500);
