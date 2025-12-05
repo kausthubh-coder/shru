@@ -1,7 +1,33 @@
+import dynamic from "next/dynamic";
 import { SpaceDefinition, SpaceKind } from "@/types/space";
-import WhiteboardSpace from "./WhiteboardSpace";
-import IDESpace from "./IDESpace";
-import LessonSpace from "./LessonSpace";
+
+// Lazy-load heavy space components so listing spaces doesn't pull their bundles
+const WhiteboardSpace = dynamic(() => import("./WhiteboardSpace"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-gray-500">
+      Loading Whiteboard...
+    </div>
+  ),
+});
+
+const IDESpace = dynamic(() => import("./IDESpace"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-gray-500">
+      Loading IDE...
+    </div>
+  ),
+});
+
+const LessonSpace = dynamic(() => import("./LessonSpace"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-gray-500">
+      Loading Lesson...
+    </div>
+  ),
+});
 
 export const SPACE_REGISTRY: Record<SpaceKind, SpaceDefinition> = {
   whiteboard: {

@@ -2,9 +2,18 @@
 
 import { Authenticated, Unauthenticated, AuthLoading } from "convex/react";
 import { SignInButton, UserButton, Waitlist } from "@clerk/nextjs";
-import Dashboard from "@/components/Dashboard";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+
+// Lazy-load the dashboard to keep the landing payload small
+const Dashboard = dynamic(() => import("@/components/Dashboard"), {
+  loading: () => (
+    <div className="min-h-[240px] rounded-xl border-2 border-black bg-[#F2F1EA] p-6 text-center text-gray-500">
+      Loading dashboard...
+    </div>
+  ),
+});
 
 export default function Home() {
   const parallaxRef = useRef<HTMLDivElement>(null);

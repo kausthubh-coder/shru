@@ -1,109 +1,89 @@
 # Architecture
 
-This project combines Next.js (App Router), Convex, Clerk, and OpenAI Realtime into a single experience. The production app scaffolding is in place while the realtime tutor prototype runs in `app/test-app/page.tsx`.
+This project combines Next.js (App Router), Convex, Clerk, and OpenAI Realtime into a session-centric workspace that persists whiteboard/IDE/lesson data per session. The legacy `/test-app` prototype remains for reference but is no longer the primary flow.
 
 **Related docs:**
-- [Convex Backend](convex.md) — Backend functions, schema, and HTTP routes
+- [Convex Backend](convex.md) — Backend schema, functions, and HTTP routes
 - [Realtime Agent](realtime-agent.md) — Agent session setup and tools
-- [Test App Guide](test-app.md) — How to use the prototype
+- [IDE Tools](ide.md) — IDE runtime and agent tools
+- [Notes System](notes.md) — YAML lessons and tools
+- [Test App Guide](test-app.md) — Legacy prototype (deprecated)
 
 ## High-level diagram
 
 Client (Next.js App)
-  ├─ Clerk UI + session (in `app/layout.tsx`)
-  ├─ Convex React client (in `components/ConvexClientProvider.tsx`)
-  ├─ Prototype page `app/test-app/page.tsx`
-  │    ├─ tldraw whiteboard
-  │    ├─ Full‑page IDE: Monaco editor with language selector; Python runs via Pyodide (loader in `app/test-app/lib/pyodide.ts`)
-  │    ├─ OpenAI Realtime Agent (WebRTC)
-  │    └─ Extracted components:
-  │         ├─ `app/test-app/components/AIVoiceAgentPanel.tsx`
-  │         └─ (Python floating windows removed)
-  │    └─ Agent modules & helpers:
-  │         ├─ `app/test-app/agent/session.ts` — encapsulates connect/configure/lifecycle for the Realtime session
-  │         ├─ `app/test-app/agent/runtime.ts` — builds runtime bridges for tools (whiteboard/ide/notes)
-  │         ├─ `app/test-app/agent/registry.ts` — central builder for all tools
-  │         ├─ `app/test-app/agent/tools/*` — modular tool definitions
-  │         └─ Extracted helpers/services:
-  │         ├─ `app/test-app/lib/realtimeInstructions.ts`
-  │         ├─ `app/test-app/lib/viewContext.ts`
-  │         ├─ `app/test-app/services/context/index.ts` — combined auto‑context sender with dedup/throttle
-  │         └─ `app/test-app/services/autoContext.ts` — legacy sender (fallback)
-  │    └─ Notes (YAML-first in test-app):
-  │         ├─ `app/test-app/types/notesYaml.ts` — zod schemas + parse/serialize helpers
-  │         ├─ `app/test-app/components/NotesEditor.tsx` — YAML editor with validation
-  │         └─ `app/test-app/components/NotesRenderer.tsx` — renders text/quiz/input/embed
-  └─ Standard pages (`/`, `/server`, etc.)
+  ├─ Clerk UI + session (via middleware and `app/layout.tsx`)
+  ├─ Convex React client (`components/ConvexClientProvider.tsx`)
+  ├─ Landing + dashboard (`app/page.tsx`, `components/Dashboard.tsx`)
+  │    └─ Create/list sessions with selectable spaces (whiteboard, IDE, lesson)
+  ├─ Session workspace (`app/session/[sessionId]/page.tsx`)
+  │    └─ `components/session/SessionWorkspace.tsx`
+  │         ├─ Tabs: whiteboard (tldraw v4), code (Monaco + Pyodide), notes (YAML)
+  │         ├─ Voice agent UI (`components/session/AIVoiceAgentPanel.tsx`)
+  │         ├─ Agent session + runtime (`components/session/agent/{session,runtime,registry}.ts`)
+  │         ├─ Agent tools (`components/session/agent/tools/*`)
+  │         ├─ Auto-context senders (`components/session/services/context/index.ts`, fallback `services/autoContext.ts`)
+  │         └─ Shared helpers (`lib/viewContext.ts`, `lib/pyodide.ts`, `lib/prompts/tutor.ts`)
+  └─ Legacy prototype (`app/test-app/**`) — kept for comparison only
 
 Convex Backend (`convex/`)
-  ├─ `schema.ts` — database schema (users table for Clerk sync)
-  ├─ `users.ts` — user queries/mutations for Clerk integration
-  ├─ `http.ts` — HTTP routes (`/realtime/token`, `/clerk-users-webhook`)
+  ├─ `schema.ts` — users, sessions, and per-space tables (whiteboard/ide/lesson)
+  ├─ `sessions.ts` — create/list/get sessions and seed default space content
+  ├─ `spaces.ts` — get/update whiteboard snapshots, IDE files, lesson YAML
+  ├─ `users.ts` — Clerk-backed user storage and helpers
+  ├─ `http.ts` — `/realtime/token` + `/clerk-users-webhook`
   └─ `realtime.ts` — internal action to mint OpenAI client secrets
 
 OpenAI
-  └─ Realtime API used to create ephemeral client secrets and run the agent
+  └─ Realtime API used to mint ephemeral client secrets and run the agent
 
 ## Data & control flow
 
-1) The browser loads `app/test-app/page.tsx` and, when starting the agent, fetches `GET /realtime/token` from the Convex HTTP router (`convex/http.ts`).
+1) Authenticated user creates or opens a session from the dashboard. Convex stores session metadata and per-space content (`sessions`, `whiteboard_sessions`, `ide_sessions`, `lesson_sessions`).
 
-2) That HTTP endpoint calls `internal.realtime.mintClientSecret` (defined in `convex/realtime.ts`) using `OPENAI_API_KEY` set in Convex environment variables. It returns `{ value: "ek_..." }`.
+2) The session page mounts `SessionWorkspace`, which loads space data from Convex (`convex/spaces.ts`) and hydrates the whiteboard/IDE/lesson tabs.
 
-3) The client initializes `@openai/agents/realtime` with WebRTC and the returned secret. It registers a suite of tools that bridge into the whiteboard, IDE workspace, and notes.
-   - The voice agent panel UI is encapsulated in `AIVoiceAgentPanel`.
-   - Code runs in a full‑page IDE; Python executes client‑side via Pyodide (loader in `app/test-app/lib/pyodide.ts`).
+3) When the user clicks Connect, the client fetches a token from `GET /api/realtime/token` (Next.js proxy). That route forwards to the Convex HTTP router (`/realtime/token`), which calls `internal.realtime.mintClientSecret` using `OPENAI_API_KEY` and returns `{ value: "ek_..." }`.
 
-4) The page streams auto‑context to the agent: a compact JSON summary of the viewport + an image snapshot. By default a combined sender dispatches both in a single message with basic dedup/throttling; it falls back to the legacy two‑message flow on failure. The agent reasons over those inputs and calls tools as needed.
+4) The client initializes `@openai/agents/realtime` over WebRTC via `createRealtimeSessionHandle`, registers tools from `components/session/agent/tools/*`, and applies tutor instructions from `lib/prompts/tutor.ts`.
 
-5) A debug layer exposes "Show Context" (the last JSON + image sent) and "Show Calls" (structured tool events) for troubleshooting.
+5) Before responses, the client streams auto-context: a compact JSON summary of the workspace plus a viewport JPEG. The combined sender (`services/context/index.ts`) deduplicates within ~300ms and debounces ~120ms before triggering `response.create`; fallback splits text/image sends.
 
-6) Regular app pages (`/`, `/server`) demonstrate conventional Convex patterns (queries/mutations, server preloading), independent of the prototype.
+6) Structured logs, context viewer, and tool-call viewer are exposed via the voice agent panel for debugging.
 
 ## Auth
 
-- Next.js pages are wrapped with `ClerkProvider` in `app/layout.tsx`.
-- Convex functions can optionally enforce auth (e.g., gating `/realtime/token` by checking `ctx.auth.getUserIdentity()`), though this prototype leaves it open in dev.
+- Next.js uses Clerk middleware (`middleware.ts`) on protected routes.
+- Convex functions can enforce auth (e.g., gate `/realtime/token` inside `convex/http.ts` by checking `ctx.auth.getUserIdentity()`).
 
 ## Files of interest
 
-- `app/test-app/page.tsx` — the prototype UI and agent wiring (now using helpers/services)
-- `app/test-app/prompts/tutor.ts` — persona‑based tutor instructions (current)
-- `app/test-app/lib/realtimeInstructions.ts` — legacy single prompt
-- `app/test-app/lib/viewContext.ts` — view context + screenshot helpers
-- `app/test-app/services/context/index.ts` — combined auto‑context sender with dedup/throttle
-- `app/test-app/services/autoContext.ts` — legacy auto‑context sender (fallback)
-- `app/test-app/agent/tools/*` — modularized tool definitions (whiteboard, IDE, notes)
-- `app/test-app/agent/registry.ts` — central builder for all tools
-- `app/test-app/types/toolContracts.ts` — shared tool contracts, runtime bridges, and logging wrapper
-- `convex/schema.ts` — database schema definition
-- `convex/users.ts` — user management (Clerk integration)
-- `convex/http.ts` — HTTP routes (CORS + `/realtime/token`, `/clerk-users-webhook`)
-- `convex/realtime.ts` — action that POSTs to OpenAI to mint ephemeral client secrets
-- `components/ConvexClientProvider.tsx` — Convex React provider setup
+- `app/page.tsx`, `components/Dashboard.tsx` — landing + session creation/list
+- `app/session/[sessionId]/page.tsx` — session wrapper
+- `components/session/SessionWorkspace.tsx` — workspace + agent wiring
+- `components/spaces/{WhiteboardSpace,IDESpace,LessonSpace}.tsx` — embeddable spaces
+- `components/session/agent/{session,runtime,registry}.ts` — realtime session handle, runtime bridges, tool registry
+- `components/session/agent/tools/*` — tool definitions (whiteboard, IDE, notes)
+- `components/session/services/context/index.ts` — combined auto-context sender (preferred)
+- `components/session/services/autoContext.ts` — legacy sender (fallback)
+- `convex/schema.ts`, `convex/sessions.ts`, `convex/spaces.ts`, `convex/users.ts` — data model and CRUD
+- `convex/http.ts`, `convex/realtime.ts` — HTTP router + client-secret minting
+- `app/api/realtime/token/route.ts` — Next.js proxy to Convex token endpoint
+- Legacy prototype: `app/test-app/**` (see `docs/test-app.md`)
 
 ## Extending
 
-- Add new Convex tables in `convex/schema.ts`
-- Create new queries/mutations/actions in `convex/*.ts` files
-- Tighten `/realtime/token` auth (uncomment identity checks in `convex/http.ts`), add rate limiting per user, and add logging/analytics
-- Split the prototype into modular components as functionality stabilizes
-- Extend the `users` table schema if you need additional user fields beyond Clerk data
+- Add new spaces or tables in `convex/schema.ts`; wire CRUD in `convex/spaces.ts`.
+- Tighten `/realtime/token` auth/rate limits in `convex/http.ts`; add logging.
+- Extend session metadata (e.g., roles, collaborators) in `convex/sessions.ts`.
+- Add new tools via `components/session/agent/tools/*` and register in `registry.ts`.
+- Replace or augment tutor prompts in `lib/prompts/tutor.ts`.
 
-## Recent changes (voice agent internals)
+## Recent changes
 
-- Tools and session are modular:
-  - Session encapsulated in `app/test-app/agent/session.ts`
-  - Runtime bridges consolidated in `app/test-app/agent/runtime.ts`
-  - Tool definitions in `app/test-app/agent/tools/{whiteboard,ide,notes}.ts`
-  - Central registry in `app/test-app/agent/registry.ts` builds the tool array
-  - Shared contracts in `app/test-app/types/toolContracts.ts`, including `createWrapExecute` for unified telemetry
-- Enhanced observability:
-  - Console + in‑app Logs for tool start/done/error with timing and rid
-  - Action mapping logs from `page.tsx` including the final `editor.createShape` payload
-- tldraw v4.0.2 compatibility:
-  - `geo` shapes no longer set inline text; labeling creates a separate text shape near the target (via `agent_label`) to avoid schema errors
-  - Unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback → `rectangle`)
-  - Allowed `geo` values include: cloud, rectangle, ellipse, triangle, diamond, pentagon, hexagon, octagon, star, rhombus, rhombus-2, oval, trapezoid, arrow-right, arrow-left, arrow-up, arrow-down, x-box, check-box, heart
+- Session workspace replaces the legacy prototype as the primary flow.
+- Agent tools are modular and instrumented (`createWrapExecute`, tool event stream).
+- Auto-context sender is combined (JSON + image in one item) with dedup/debounce; legacy split sender retained as fallback.
+- tldraw v4.0.2 compatibility: text uses `richText`; geo labels are separate text shapes; geo names are normalized.
 
 

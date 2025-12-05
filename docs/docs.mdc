@@ -1,80 +1,78 @@
 # Docs Verification Checklist
 
-Last verified: 2025-01-27
+Last verified: 2025-12-05
 
-This file maps each doc in `docs/` to concrete code paths it describes. Update both the doc and this checklist together.
+This file maps each doc in `docs/` to the current code paths. Update both the doc and this checklist together.
 
 ## Index
-- architecture.md — app layers and data flow (Next.js, Convex, Realtime)
-- convex.md — schema, functions, HTTP routes, env vars
-- realtime-agent.md — session wiring, tools, auto-context, audio
-- ide.md — IDE UI and execution (Pyodide)
-- notes.md — YAML schema and tools
-- test-app.md — prototype usage and controls
-- troubleshooting.md — issues and remedies
+- architecture.md — App + session workspace architecture and data flow
+- convex.md — Schema, functions, HTTP routes, env vars
+- realtime-agent.md — Session wiring, tools, auto-context, audio
+- ide.md — IDE UI and execution (Pyodide) + agent tools
+- notes.md — YAML lesson system and tools
+- test-app.md — Legacy prototype (kept for reference)
+- troubleshooting.md — Issues and remedies
 
 ## architecture.md → code
 - UI
-  - `app/test-app/page.tsx` — prototype UI and agent wiring
-  - `app/test-app/components/*` — panel, overlays, notes
-  - `app/test-app/agent/{session,runtime,registry}.ts`
-  - `app/test-app/agent/tools/*` (whiteboard/ide/notes)
-  - `app/test-app/services/context/index.ts` (preferred combined sender)
-  - `app/test-app/services/autoContext.ts` (legacy fallback)
+  - `app/page.tsx` + `components/Dashboard.tsx` — landing + session creation/list
+  - `app/session/[sessionId]/page.tsx` — loads a session workspace
+  - `components/session/SessionWorkspace.tsx` — whiteboard/IDE/notes tabs + voice agent
+  - `components/spaces/*` — embeddable spaces (whiteboard, ide, lesson) used in sessions
+  - `components/session/agent/*` — realtime session handle, runtime bridges, tool registry
+  - Legacy: `app/test-app/**` (prototype) — see `docs/test-app.md` for minimal notes
 - Backend
-  - `convex/schema.ts` — database schema (users table)
-  - `convex/users.ts` — user queries/mutations for Clerk integration
+  - `convex/schema.ts` — users, sessions, whiteboard_sessions, ide_sessions, lesson_sessions
+  - `convex/sessions.ts` — create/list/get sessions and seed per-space defaults
+  - `convex/spaces.ts` — get/update whiteboard/IDE/lesson data
+  - `convex/users.ts` — Clerk-backed user records
   - `convex/http.ts` — `OPTIONS|GET /realtime/token`, `POST /clerk-users-webhook`
   - `convex/realtime.ts` — `internal.realtime.mintClientSecret`
+  - `app/api/realtime/token/route.ts` — Next.js proxy to Convex `/realtime/token`
 - tldraw v4.0.2
-  - Geo labels are not set inline; `agent_label` creates a separate text shape
-  - Unsupported geo names normalized; allowed list in `agent/tools/whiteboard.ts`
+  - Text shapes require `richText`; geo labels are separate text shapes
+  - Unsupported geo names are normalized; allowed list in `components/session/agent/tools/whiteboard.ts`
 
 ## convex.md → code
-- Schema: `convex/schema.ts` defines `users` table (Clerk sync), indexed by `by_clerk_id`
-- Functions: `convex/users.ts` — `currentUser`, `userLoginStatus`, `getUser`, `updateOrCreateUser`, `deleteUser`
+- Schema: `convex/schema.ts` defines users + session storage tables
+- Functions: `convex/users.ts`, `convex/sessions.ts`, `convex/spaces.ts`
 - Endpoints: `convex/http.ts` — CORS + `GET /realtime/token`, `POST /clerk-users-webhook`
 - Internal action: `convex/realtime.ts` (defaults: model `gpt-realtime`, voice `marin`)
-- Env vars: `OPENAI_API_KEY` (required), `CLERK_WEBHOOK_SECRET` (required), `CLIENT_ORIGIN` (optional), `CLERK_JWT_ISSUER_DOMAIN` (optional)
-- Next.js env vars: `NEXT_PUBLIC_CONVEX_SITE_URL`, `NEXT_PUBLIC_CONVEX_URL`
-- Client fetch logic aligns with `app/test-app/page.tsx` (`fetchEphemeralToken`)
+- Env vars: `OPENAI_API_KEY`, `CLERK_WEBHOOK_SECRET`, `CLIENT_ORIGIN`, `CLERK_JWT_ISSUER_DOMAIN`
+- Next.js env vars: `CONVEX_SITE_URL|NEXT_PUBLIC_CONVEX_SITE_URL|NEXT_PUBLIC_CONVEX_URL`
+- Client fetch logic: `app/api/realtime/token/route.ts` → Convex `/realtime/token`
 
 ## realtime-agent.md → code
-- Session connect via `app/test-app/agent/session.ts`
-- Gating: wait for `session.updated` before first response (`page.tsx`)
-- Auto-context: unified `workspace_context` (whiteboard + IDE + notes) via `services/context/index.ts` (debounce ~120ms, dedup ~300ms); fallback `services/autoContext.ts`
-- Tools registry: `app/test-app/agent/registry.ts`; tools in `agent/tools/*`
+- Session connect via `components/session/SessionWorkspace.tsx` + `components/session/agent/session.ts`
+- Gating: wait for `session.updated` before first response (see `SessionWorkspace`)
+- Auto-context: combined JSON+image sender `components/session/services/context/index.ts` (debounce ~120ms, dedup ~300ms); fallback `components/session/services/autoContext.ts`
+- Tools registry: `components/session/agent/registry.ts`; tools in `components/session/agent/tools/*`
 - Approvals: `agent_clear` emits approval request and returns `approval_required`
 - Audio defaults: model `gpt-realtime`, input `audio/pcm@24000` (semantic VAD create_response=false), output `audio/pcm`, voice `marin`
-- Text shape schema (v4): `type: 'text'` requires `props.richText` (via `toRichText(...)`). The app maps plain `text` → `richText` when creating shapes. Avoid `props.text` or `props.label` on text shapes.
- - Whiteboard: includes `agent_get_text_context` to surface visible text items in the viewport
+- Text shapes: require `props.richText`; labels are separate text shapes
 
 ## ide.md → code
-- Run is Python-only via Pyodide: `app/test-app/lib/pyodide.ts` (`loadPyodideOnce`)
-- Agent tools: `ide_read_code`, `ide_apply_edits`, `ide_run_active`, `ide_get_context`
-- UI: editor + output panel in Code tab (`page.tsx`)
+- Pyodide runner: `lib/pyodide.ts` (`loadPyodideOnce`)
+- Agent tools: `ide_create_file`, `ide_set_active`, `ide_update_content`, `ide_apply_edits`, `ide_read_code`, `ide_get_context`, `ide_run_active`
+- UI: Code tab in `components/session/SessionWorkspace.tsx`
 
 ## notes.md → code
-- Zod schema: `app/test-app/types/notesYaml.ts`
-  - Interactive blocks (`quiz|input|embed`) require unique `id`
-  - Providers: `codepen|stackblitz|jsfiddle`; `height` range enforced
-- Tools: `notes_set_yaml`, `notes_append_block_yaml`; legacy `notes_set_text`, `notes_append`
-- New tool: `notes_read_file(name?)` — reads `{ name, content }` from IDE workspace without mutating state
-- Components: `NotesEditor`, `NotesRenderer`
+- Zod schema: `types/notesYaml.ts`
+- Tools: `notes_set_yaml`, `notes_append_block_yaml`, `notes_read_file`, plus markdown setters/appends
+- Components: `components/lesson/NotesEditor`, `components/lesson/NotesRenderer`
+- Persistence: `convex/spaces.ts` (`lesson_sessions`)
 
 ## test-app.md → code
-- Tabs: Whiteboard / Code / Notes
-- Debug: Logs, Context (JSON+image), Calls
-- Device selectors + test tone in `AIVoiceAgentPanel`
-- Combined auto-context sender preferred; fallback noted
+- Legacy prototype in `app/test-app/**` (kept for reference only)
+- Marked as deprecated; see doc for brief summary
 
 ## troubleshooting.md → code
-- Token and CORS checks match `convex/http.ts`
-- Language guard path uses `session.update`
-- Race mitigation: combined sender + ~120ms debounce
-- tldraw geo rules and label behavior; text uses `richText` for both `text` and `geo` shapes.
+- Token and CORS checks: `app/api/realtime/token/route.ts` → `convex/http.ts`
+- Auto-context races: combined sender debounce/dedup
+- tldraw geo/text rules and validation
+- Language guard: `session.update` path in `SessionWorkspace`
 
 ## Planned vs Present
 - Present in code: items listed above only
-- Planned in docs (not implemented): Judge0 execution, Convex persistence for IDE/notes, `codecell` block
+- Planned in docs (not implemented): Judge0 execution, Convex persistence for test-app prototype, `codecell` block
 

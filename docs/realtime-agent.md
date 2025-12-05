@@ -1,6 +1,6 @@
 # Realtime Agent (OpenAI)
 
-This page explains how the test app uses OpenAI's Realtime API to run a voice-based tutor that can observe the whiteboard and act via tools.
+This page explains how the session workspace uses OpenAI's Realtime API to run a voice-based tutor that can observe the whiteboard and act via tools. The legacy `/test-app` prototype is deprecated.
 
 **Related docs:**
 - [Architecture Overview](architecture.md) — System architecture and data flow
@@ -10,143 +10,96 @@ This page explains how the test app uses OpenAI's Realtime API to run a voice-ba
 
 ## Token minting (server)
 
-- Endpoint: `GET /realtime/token` implemented in `convex/http.ts`.
-- The handler calls `internal.realtime.mintClientSecret` (in `convex/realtime.ts`), which POSTs to `https://api.openai.com/v1/realtime/client_secrets` using `OPENAI_API_KEY`.
+- Primary path: `GET /api/realtime/token` (Next.js) → forwards to Convex `GET /realtime/token`.
+- Convex handler (`convex/http.ts`) calls `internal.realtime.mintClientSecret` (`convex/realtime.ts`), which POSTs to `https://api.openai.com/v1/realtime/client_secrets` using `OPENAI_API_KEY`.
 - Returns `{ value: "ek_..." }` as a short-lived client secret.
-- CORS: `convex/http.ts` exposes `OPTIONS` preflight and allows `CLIENT_ORIGIN` (or `*` by default in dev).
+- CORS: `convex/http.ts` exposes `OPTIONS /realtime/token` and allows `CLIENT_ORIGIN` (or `*` in dev).
 
-## Client session setup
+## Client session setup (SessionWorkspace)
 
-`app/test-app/page.tsx` contains the prototype. Core session wiring is extracted into `app/test-app/agent/session.ts` and tool bridges into `app/test-app/agent/runtime.ts`. The critical flow when the user clicks Start (with UI handled by `AIVoiceAgentPanel`):
+`components/session/SessionWorkspace.tsx` owns the flow when the user clicks Connect (UI: `AIVoiceAgentPanel`):
 
-1. Fetches the client secret from `/realtime/token` (base URL from `NEXT_PUBLIC_CONVEX_SITE_URL`).
-2. Uses `createRealtimeSessionHandle()` to grab microphone stream and build a `OpenAIRealtimeWebRTC` transport.
-3. Connects a `RealtimeSession` with the secret via the session handle.
-4. Sends a `session.update` to configure model (`gpt-realtime`), audio IO, and persona‑based tutor instructions.
-5. Gates first response until the session is updated (avoids early-turn drift).
-6. Streams auto-context: a unified `workspace_context` JSON (whiteboard + IDE + notes) plus a viewport-bounded JPEG snapshot.
+1. Fetch the client secret from `/api/realtime/token` (uses `CONVEX_SITE_URL` or `NEXT_PUBLIC_CONVEX_URL` to reach Convex).
+2. Use `createRealtimeSessionHandle()` to grab microphone stream and build an `OpenAIRealtimeWebRTC` transport.
+3. Connect a `RealtimeSession` with the secret via the handle.
+4. Send `session.update` to configure model (`gpt-realtime`), audio IO, and tutor instructions (`lib/prompts/tutor.ts`). Gate the first response until `session.updated` arrives.
+5. Register tools from `components/session/agent/registry.ts` (definitions in `components/session/agent/tools/*`; runtime bridges in `components/session/agent/runtime.ts`).
+6. Stream auto-context: unified `workspace_context` JSON (whiteboard + IDE + notes) plus a viewport JPEG via the combined sender (`components/session/services/context/index.ts`).
 
-- The instructions string is built in `app/test-app/prompts/tutor.ts` (persona variants) and sent via `session.update`. The legacy `app/test-app/lib/realtimeInstructions.ts` remains for a single‑prompt variant.
- - The auto‑context JSON and screenshot are produced by `app/test-app/lib/viewContext.ts`. A combined sender in `app/test-app/services/context/index.ts` posts both in one message with dedup/throttle; on failure it falls back to the legacy `app/test-app/services/autoContext.ts` two‑message flow.
+### Preventing drift
 
-### Preventing Hallucinations and Unrelated Actions
-
-- Keep auto-context compact and accurate; verify `workspace_context` JSON and screenshots match the current viewport
-- Limit tool call budget per turn; add concise preambles; re-assert instructions when drift detected
-- Telemetry: Console and in-app Logs capture `[tool:start|done|error]` with request ID (rid) and timings
-- Action mapping logs show `[act:start|map|done|error]` and the final `editor.createShape` payload for debugging
-- Detect off-topic calls to trigger a prompt re-assert via `session.update`
-
-### Initialization Gating
-
-To prevent early-turn drift, the client gates the first response:
-
-1. After connecting, the client injects the operating prompt via `session.update`
-2. Waits for `session.updated` event acknowledgment
-3. Only then triggers auto-context + `response.create`
-
-**Alternative:** Pass an initial session config on construction to reduce races:
-
-```ts
-const session = new RealtimeSession(agent, {
-  model: 'gpt-realtime',
-  config: {
-    inputAudioTranscription: { model: 'gpt-4o-mini-transcribe', language: 'en' },
-  },
-});
-```
+- Gate on `session.updated` before first response.
+- Keep auto-context compact; verify JSON + screenshot match the viewport.
+- Re-assert instructions if transcripts drift (language guard in `SessionWorkspace` monitors deltas).
+- Telemetry: Logs + Calls overlays show `[tool:start|done|error]`, `[act:start|map|done|error]`, and payload previews.
 
 ## Tools
 
-The agent registers tools via a modular registry. Definitions live in `app/test-app/agent/tools/*` and are assembled in `app/test-app/agent/registry.ts`. Runtime bridges are built in `app/test-app/agent/runtime.ts` and shared logging wrappers live in `app/test-app/types/toolContracts.ts`.
+Tools are registered via the modular registry (`components/session/agent/registry.ts`) and wrapped with `createWrapExecute` for consistent logging and approval hooks.
 
 ### Destructive tool approvals
-Some tools (e.g., `agent_clear`) are flagged for approval. The tool emits an approval request via the runtime event stream (`onToolEvent`) and returns `approval_required` unless approved; the page can present a confirmation UI (see `app/test-app/components/ToolApprovalDialog.tsx`) and re‑dispatch.
+- `agent_clear` is approval-gated. It emits an approval request via `onToolEvent` and returns `approval_required` until UI confirms.
 
-Whiteboard tools:
+### Whiteboard tools (tldraw v4.0.2)
+- Create: `agent_create_shape`, `agent_create`, `agent_create_text`, `agent_pen`
+- Transform: `agent_move`, `agent_resize`, `agent_rotate`, `agent_update`
+- Layout: `agent_align`, `agent_distribute`, `agent_stack`, `agent_place`
+- Z-order: `agent_bring_to_front`, `agent_send_to_back`
+- Context/camera: `agent_get_view_context`, `agent_get_screenshot`, `agent_capture_view_image`, `agent_send_view_image`, `agent_set_view`, `agent_get_text_context`
+- Delete/clear: `agent_delete`, `agent_clear` (requires approval)
+- Notes: `agent_label` creates a separate text shape near the target (geo labels are not inline)
 
-**Shape creation:**
-- `agent_create_shape` / `agent_create` — create geo shapes (rectangles, ellipses, etc.). For tldraw v4.0.2, inline text on geo is disabled and unsupported `geo` names are normalized (e.g., `parallelogram → rhombus`, `circle → ellipse`, `square → rectangle`, fallback → `rectangle`).
-- `agent_create_text` — create standalone text shapes at coordinates
-- `agent_pen` — draw paths with points (smooth/straight, optional fill)
+### IDE tools
+- `ide_create_file`, `ide_set_active`, `ide_update_content`
+- `ide_apply_edits` (line/char), `ide_read_code`, `ide_get_context`
+- `ide_run_active` (Python only; Pyodide)
 
-**Shape manipulation:**
-- `agent_move`, `agent_resize`, `agent_rotate` — transform existing shapes
-- `agent_label` — create a text label near a shape (creates separate text shape for tldraw v4 compatibility)
-- `agent_update` — update shape properties (text, color, fill, position, size, geo type)
-- `agent_delete`, `agent_clear` — remove shapes / clear canvas (clear requires approval)
-
-**Layout & organization:**
-- `agent_align`, `agent_distribute`, `agent_stack`, `agent_place` — layout tools
-- `agent_bring_to_front`, `agent_send_to_back` — z-order management
-
-**Context & camera:**
-- `agent_get_view_context` — returns summarized context JSON (bounds, shapes, selections)
-- `agent_get_screenshot` / `agent_capture_view_image` — returns a data URL JPEG of the viewport
-- `agent_send_view_image` — captures viewport and attaches image to conversation (optionally triggers response)
-- `agent_set_view` — move the viewport camera to specified bounds
-- `agent_get_text_context` — return visible texts from shapes in the viewport
-
-IDE and Notes:
-
-- `ide_read_code`, `ide_apply_edits`, `ide_run_active`, `ide_get_context`
+### Notes tools
 - `notes_set_text`, `notes_append`
-- `notes_set_yaml` — replace entire notes YAML after validation
-- `notes_append_block_yaml` — append a single validated block (enforces id uniqueness)
-- `notes_read_file(name?)` — read a YAML lesson from the IDE workspace without mutating state
+- `notes_set_yaml`, `notes_append_block_yaml`
+- `notes_read_file(name?)` — read a lesson YAML from IDE workspace without mutating state
 
-Text shape note (tldraw v4): Text shapes must use `props.richText`. We convert plain strings to rich text via `toRichText(...)` when creating text. Do not set `props.text` or `props.label` on `type = 'text'` shapes—those are invalid and will trigger validation errors.
-
-Labeling note: `agent_label` creates a separate text shape near the target when inline geo text is unsupported (tldraw v4.0.2). For geo shapes, any text content should also be set via `props.richText` rather than `label`.
+### Shape/text notes
+- Text shapes must use `props.richText`. Do not set `props.text` or `props.label` on `type = 'text'` shapes.
+- Geo shapes avoid inline labels; `agent_label` creates a nearby text shape.
 
 ## Auto‑context strategy
 
 Before most responses, the client:
 
-- Sends a unified `workspace_context` JSON with:
+- Sends unified `workspace_context` JSON:
   - Whiteboard: bounds, blurry shapes, peripheral clusters, selected shapes
-  - IDE: name, language, full active buffer content
+  - IDE: name, language, full active buffer
   - Notes: full YAML document
-- Captures and sends a screenshot of the viewport when available
-- Uses a combined sender that deduplicates within a short window (skips no‑ops) and debounces ~120ms before `response.create`
-
-This enables OCR‑free reasoning about structure while using the image for visual grounding.
-
-- Implementation details:
-  - The combined sender posts both parts in a single `conversation.item.create` with a `content` array containing an `input_text` (JSON) and, when available, an `input_image` (data URL).
-  - Debounce before `response.create`: 120ms (gives the data channel time to deliver context).
-  - Dedup window: 300ms (skips sending if both JSON and image are unchanged within the window).
-  - Screenshot is only attached when at least one shape is visible in the viewport; otherwise it is omitted.
-
-- Context helpers: `app/test-app/lib/viewContext.ts`
-- Sender (preferred): `app/test-app/services/context/index.ts` (combined)
-- Sender (legacy fallback): `app/test-app/services/autoContext.ts`
+- Captures a viewport JPEG when shapes are visible
+- Uses combined sender (`services/context/index.ts`):
+  - Dedup window: ~300ms (skip if unchanged)
+  - Debounce: ~120ms before `response.create`
+  - Content: single `conversation.item.create` with `input_text` (+ `input_image` when available)
+- Fallback sender (`services/autoContext.ts`) sends text then image separately.
 
 ### Debug overlays
 
-- “Show Context” displays the last `workspace_context` JSON and screenshot sent to the model.
-- “Show Calls” displays structured tool start/done/error with rid, timings, and small payload previews.
-- Use these to verify the model saw the correct viewport and actually called a tool before you suspect the prompt.
+- “Show Context” displays the last JSON + screenshot.
+- “Show Calls” shows tool events with rid/timing.
+- Logs overlay shows transport, tool, and action mapping events.
 
 ## Audio IO
 
-- Input: microphone stream with a simple VAD to show "user speaking" state
-- Output: audio element is analyzed to show "agent speaking" state
+- Input: microphone stream + analyser for “user speaking” meter.
+- Output: audio element analysed for “agent speaking” meter.
 
 ### Language guard
-- The client monitors audio/text deltas and gently re‑asserts English‑only instructions if non‑ASCII content spikes. This is done via a lightweight `session.update` with the operating prompt.
+- Monitors audio/text deltas; re-asserts English-only instructions via `session.update` if non-ASCII spikes.
 
 ### Audio/voice defaults and quick reset
 
-For a natural, “normal” voice quality, use these defaults:
-
 - Model: `gpt-realtime`
 - Output modalities: `["audio"]`
-- Input audio: `{ type: "audio/pcm", rate: 24000 }`
-- Output audio: `{ type: "audio/pcm" }` (avoid `audio/pcmu` unless you want a telephony sound)
-- Voice: `marin`
+- Input audio: `{ type: "audio/pcm", rate: 24000, turn_detection: { type: "semantic_vad", eagerness: "medium", create_response: false, interrupt_response: false } }`
+- Output audio: `{ type: "audio/pcm" }, voice: "marin"`
 
-You can re-assert these at any time after the session connects:
+You can re-assert after connect:
 
 ```ts
 session.transport?.sendEvent?.({
@@ -165,9 +118,10 @@ session.transport?.sendEvent?.({
 
 ## Hardening & productionization
 
-- Require auth on `/realtime/token` and enforce per-user rate limits
-- Store minimal audit logs of token mints and agent actions
-- Consider keeping a summarized board state server-side for continuity
-- Tune prompts and tool error handling for reliability
+- Require auth + rate limits on `/realtime/token`.
+- Persist minimal audit logs of token mints and agent actions.
+- Add retry/backoff around auto-context sends.
+- Consider collaborative sessions (multi-user) by expanding schema and access checks.
+- Add analytics for tool latency and context sizes.
 
 

@@ -1,67 +1,69 @@
 # IDE Tools and Execution (Monaco + Pyodide)
 
-This document describes the IDE capabilities exposed to the agent and the UI in the test app.
+This document describes the IDE capabilities exposed to the agent and the UI in the session workspace.
 
 **Related docs:**
 - [Realtime Agent](realtime-agent.md) — Tool registry and agent setup
-- [Test App Guide](test-app.md) — UI and controls
+- [Architecture](architecture.md) — Session flow
 
 ## Overview
-- Editor: Monaco under the Code tab
-- Runner: Python-only via Pyodide (in-browser)
+- Editor: Monaco under the Code tab in `components/session/SessionWorkspace.tsx`
+- Runner: Python-only via Pyodide (in-browser) loaded by `lib/pyodide.ts`
 - Output panel: aggregated stdout/stderr/info
-- Language selector changes the editor language; Run only executes when language is Python
+- Language selector changes editor language; Run executes only when language is Python
 
-## Available IDE Tools
-
-Only the following tools are registered by the test app (see `app/test-app/agent/tools/ide.ts`):
+## Available IDE Tools (`components/session/agent/tools/ide.ts`)
 
 **`ide_get_context()`**
-- Returns JSON string: `{ files: Array<{ name, language, size }>, active?: string }`
-- Lists all files in workspace and identifies the active file
+- Returns JSON: `{ files: Array<{ name, language, size }>, active?: string }`
 
 **`ide_read_code()`**
-- Returns JSON string: `{ name, language, content }` for the active file
-- Use this to read the current buffer before making edits
+- Returns JSON: `{ name, language, content }` for the active file
 
 **`ide_apply_edits({ edits })`**
-- Applies precise edits to the active file
-- Supports two edit types:
-  - **Char-range:** `{ type: "char", range: { start, end }, text }`
-  - **Line-range:** `{ type: "line", range: { startLine, endLine }, text }`
-- Returns summary with number of edits applied
+- Precise edits on active file
+  - Char-range: `{ type: "char", range: { start, end }, text }`
+  - Line-range: `{ type: "line", range: { startLine, endLine }, text }`
+- Returns summary with count
 
 **`ide_run_active()`**
-- Runs the active file if language is Python
-- Returns ToolResult with `data` as JSON: `{ stdout, stderr, info }`
-- If language is not Python, returns error message: "Run currently supports Python only. Switch language to Python to execute."
+- Runs active file if language is Python
+- Returns `{ stdout, stderr, info }` (as JSON in ToolResult.data)
+- If not Python, returns info message to switch language
 
-> **Note:** Multi-file management helpers (`ide_create_file`, `ide_set_active`, `ide_update_content`) exist internally but are not exposed via the tool registry. The agent works with a single active file buffer.
+**`ide_create_file({ name, language, content })`**
+- Creates a new file in workspace and selects it
 
-## Recommended Workflow
+**`ide_set_active({ name })`**
+- Switches active file by name
 
-For single-file, in-memory editing:
+**`ide_update_content({ content })`**
+- Replaces active file content
 
-1. **Read** the current buffer with `ide_read_code()`
-2. **Edit** by applying precise diffs with `ide_apply_edits({ edits })` using char or line ranges
-3. **Run** with `ide_run_active()` when the language is Python
+## Recommended Agent Workflow
 
-> **Limitation:** The agent edits the in-memory buffer only; there is no file persistence. Do not attempt to create or switch files.
+1. `ide_get_context` to see files + active file
+2. `ide_set_active` (optional) to pick a file
+3. `ide_read_code` to fetch current buffer
+4. `ide_apply_edits` (char/line) to change code
+5. `ide_run_active` (Python only) to execute
+
+> Files are stored per session in Convex (`ide_sessions`). The agent works against the in-memory buffer shown in the UI; saves propagate via `spaces.updateIde`.
 
 ## Python Execution Details
 
-- **Runtime:** Pyodide v0.26 (loaded once by `app/test-app/lib/pyodide.ts`)
-- **Output capture:** Stdout/stderr are captured and aggregated into the tool return payload
-- **UI display:** Outputs also appear in the bottom Output panel with timestamped lines
+- **Runtime:** Pyodide v0.26 (loaded once by `lib/pyodide.ts`)
+- **Output capture:** Stdout/stderr captured and aggregated into tool payload and UI console
+- **UI display:** Output panel with timestamped lines; toggled in the Code tab
 
 ## UI Quick Reference
 
-- **Language selector:** Choose Python to enable Run button
-- **Run button (▶):** Executes the active Python file; shows progress and displays aggregated output on completion
-- **Output panel:** Toggle visibility; includes timestamped lines per channel (stdout/stderr/info)
+- **Language selector:** Choose Python to enable Run
+- **Run button (▶):** Executes active Python file; shows progress and updates Output panel
+- **Output panel:** Toggle visibility; includes stdout/stderr/info channels
 
 ## Limitations
 
-- **Language support:** Only Python execution is supported
-- **Persistence:** Edits operate on the current in-memory buffer; there is no persistence layer
-- **Multi-file:** Single active file only; file creation/switching not exposed to agent
+- **Language support:** Only Python execution
+- **Multi-file:** Multiple files allowed; active file chosen by name
+- **Persistence:** Stored per session in Convex; no cross-session sharing

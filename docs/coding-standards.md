@@ -1,11 +1,12 @@
 # Coding Standards
 
 ## Organization
-- Group related code by feature or purpose under `app/test-app/`:
-  - `components/` UI components
-  - `lib/` stateless utilities (formatting, instructions, view context)
-  - `services/` side-effectful orchestration (auto-context sending)
-- Avoid monolithic files. Extract helpers when a function grows beyond one concern.
+- Group related code by feature under `components/session/` and `components/spaces/`:
+  - `agent/` realtime runtime, registry, tools
+  - `services/` auto-context senders
+  - `lesson/` shared notes components
+- Use `lib/` for stateless utilities (prompts, view context, pyodide loader).
+- Avoid monolithic files; extract helpers when a function spans multiple concerns.
 
 ## Naming & Style
 - JavaScript/TypeScript: camelCase for variables/functions, PascalCase for components/classes, ALL_CAPS for constants.
@@ -15,13 +16,13 @@
 
 ## Comments & Docs
 - Explain “why” and non‑obvious logic. Avoid restating the code.
-- Co-locate small comments above blocks they explain.
-- Maintain feature docs in `docs/` (architecture, realtime-agent, ide, notes, context).
+- Co-locate small comments above the blocks they explain.
+- Maintain feature docs in `docs/` (architecture, realtime-agent, ide, notes, troubleshooting).
 
 ## Modules
-- `lib/realtimeInstructions.ts` builds the tutor instructions string.
+- `lib/prompts/tutor.ts` builds the tutor instructions string.
 - `lib/viewContext.ts` provides `getViewContext` and `getViewportScreenshot`.
-- `services/autoContext.ts` sends compact context and image to the session transport.
+- `components/session/services/context` sends combined context+image to the session transport (preferred); `services/autoContext` is fallback.
 
 ## Error handling
 - Fail fast with descriptive messages.

@@ -2,87 +2,71 @@
 
 ## Token fetch fails (401/403/500)
 
-- Ensure `OPENAI_API_KEY` is set in the Convex dashboard.
-- If you enabled auth checks in `convex/http.ts`, verify you are signed in and Convex can read identity.
-- Confirm `NEXT_PUBLIC_CONVEX_SITE_URL` is the correct Convex Site URL.
+- Ensure `OPENAI_API_KEY` is set in Convex.
+- `CONVEX_SITE_URL` / `NEXT_PUBLIC_CONVEX_URL` should point to your Convex deployment (site URL).
+- If auth is enabled in `convex/http.ts`, sign in first and confirm Convex sees identity.
+- Proxy path: `/api/realtime/token` (Next) → Convex `/realtime/token`; check both network calls.
 
 ## CORS errors on `/realtime/token`
 
-- Set `CLIENT_ORIGIN` in Convex env vars to your Next.js origin (e.g. `http://localhost:3000`).
-- Preflight `OPTIONS` is already routed; check browser console/network panel for details.
+- Set `CLIENT_ORIGIN` in Convex env vars to your Next.js origin (e.g., `http://localhost:3000`).
+- Preflight `OPTIONS` is routed; confirm request headers match allowed list.
 
 ## No audio or microphone issues
 
 - Grant microphone permission and refresh.
-- If the audio output is silent, try clicking anywhere on the page after Start (autoplay policies).
-- Check console logs for WebRTC or audio context errors.
+- If audio output is silent, click the page after Start (autoplay policies).
+- Check console for WebRTC or audio context errors; switch devices in the agent panel.
 
-## Agent isn’t acting on the board
+## Agent isn’t acting on the board/IDE/notes
 
-- Open the Logs window to inspect events.
-- Open “Show Calls” to see whether tools were actually invoked and with what arguments.
-- Open “Show Context” to confirm the viewport JSON and screenshot are fresh and correct.
-- Ensure there are visible shapes; some tools require existing selection/ids.
-- Try `agent_get_view_context` or `agent_send_view_image` to re-sync context.
+- Open Logs / Calls / Context from the voice agent panel.
+- Ensure visible shapes exist; some tools need ids/selection.
+- Use `agent_get_view_context` or `agent_send_view_image` to re-sync context.
+- Confirm auto-context JSON + image are updating (Context overlay timestamps).
 
-## tldraw validation errors (Unexpected property / value)
+## tldraw validation errors (Unexpected property/value)
 
-- If you see errors like `At shape(type = geo).props.geo: Expected ... got parallelogram`:
-  - The installed version (v4.0.2) only allows certain `geo` values (e.g., rectangle, ellipse, triangle, rhombus, etc.). The app now normalizes unknown values to the nearest supported one (e.g., parallelogram → rhombus; fallback rectangle).
-- If you see errors about `props.text` or `props.label` on `geo` shapes:
-  - v4.0.2 doesn’t accept inline text for `geo`. The app disables inline labels for `geo` to prevent schema errors. Use a separate text shape if you need labels.
-- If you see errors like `At shape(type = text).props.label: Unexpected property` or similar for text shapes:
-  - In tldraw v4, text shapes must use `props.richText` (a document-like structure). Convert plain strings with `toRichText('your text')` and set `props.richText` when creating `type: 'text'`. Do not use `props.text` or `props.label` on text shapes.
-- Check DevTools console:
-  - Look for `[tldraw:createShape]` to see the final payload. Look for `[geo:coerce] from=... → ...` to confirm normalization took place.
+- `geo` values are normalized; unsupported names fall back to allowed list.
+- Geo shapes: no inline labels; use separate text shapes (`agent_label` creates one).
+- Text shapes must use `props.richText`; do not set `props.text` / `props.label`.
+- Check DevTools for `[tldraw:createShape]` and `[geo:coerce]` logs.
 
 ## Language drift or unrelated responses
 
-- The app gates the first response until `session.update` (prompt/audio config) completes. If you see drift on the very first turn, check that `session.update` appears in logs before `response.create`.
-- The session is created with `inputAudioTranscription.language = 'en'`. If your use-case requires multilingual input, remove or change this, but expect more variability.
-- If you still experience drift, enable logs and review `response.output_audio_transcript.delta` frames. The client will re-assert the prompt via `session.update` when a non‑ASCII ratio is high.
+- First response is gated until `session.update` completes; verify log order.
+- Language guard re-asserts prompt if non-ASCII spikes; see transcript deltas in logs.
 
 ## Context/response race conditions
 
-- The client sends auto‑context (JSON + screenshot) and then triggers `response.create`. On slow networks you might see the model respond before context is attached.
-- Workarounds:
-  - Keep “Show Context” open and confirm timestamps precede the response.
-  - Add a small debounce (100–150ms) before `response.create` to give the data channel time to deliver context.
-  - Provide an initial session config at construction (see `docs/realtime-agent.md`) to avoid early‑turn races.
-  - Prefer the combined sender (`app/test-app/services/context/index.ts`) which deduplicates and debounces ~120ms before `response.create`.
+- Combined sender dedups (~300ms) and debounces (~120ms) before `response.create`.
+- Keep Context overlay open to confirm timestamps; if needed, trigger `agent_send_view_image`.
 
 ## Pyodide errors
 
-- The page loads `https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js`. Confirm network access.
-- Errors running Python code will appear in the Output panel under the Code tab.
-- If the Monaco editor throws an unexpected error during layout, ensure the Code tab is visible and try toggling the Output panel; the editor auto-resizes with `automaticLayout`.
+- Pyodide loads from `https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js`; check network.
+- Run only executes when language is Python; otherwise returns an info message.
+- If Monaco glitches, toggle Output panel or switch tabs to force layout.
 
 ## TypeScript or lint errors
 
-- Run `npm run lint` and inspect file paths in the output.
-- Ensure `@types/node` and TypeScript are installed (already in `devDependencies`).
+- Run `npm run lint` and inspect paths in the output.
 
 ## Next.js dev 500 after refactors (Module not found)
- - Verify relative import paths after moving files (e.g., from `app/test-app/lib/` to `agent/shared`, use `../../../agent/shared/...`).
- - Restart `npm run dev` if the resolver caches stale paths.
- - Check import traces in the error overlay and fix the first failing path.
+
+- Verify relative imports after moving files (e.g., `components/session/...`).
+- Restart `npm run dev` if resolver cached stale paths.
+- Follow the first import trace in the overlay.
+
 ## YAML paste errors in Notes
 
-- Symptom: errors like "end of the stream or a document separator is expected".
-- Cause: Pasted prose/backticks along with YAML; the editor expects only a single YAML document.
-- Fix:
-  - Remove code fences (```), headings, and explanatory text from the paste.
-  - Keep only keys like `title`, `version`, optional `metadata`, and `blocks`.
-  - For tools: pass a single block (no leading `-`) to `notes_append_block_yaml`.
-- Verify relative import paths when moving files. From `app/test-app/lib/` to `agent/shared`, the correct path is `../../../agent/shared/...`.
-- Restart `npm run dev` if the resolver caches stale paths.
-- Check import traces in the error overlay to fix the first failing path.
+- Symptom: “end of the stream or a document separator is expected”.
+- Fix: remove code fences/headings; keep a single YAML doc with `title`, `version`, optional `metadata`, `blocks`.
+- For tools, pass a single block (no leading `-`) to `notes_append_block_yaml`.
 
-## Voice sounds weird/robotic after changes
+## Voice sounds weird/robotic
 
-- Symptom: output voice sounds tinny/telephony or distorted instead of the usual natural voice.
-- Common causes: switching output format to `audio/pcmu`, changing voice to an unintended one, or stale session config.
-- Fix (re-assert defaults via `session.update` after connect):
+- Re-assert defaults after connect:
 
 ```ts
 session.transport?.sendEvent?.({
@@ -99,9 +83,4 @@ session.transport?.sendEvent?.({
 });
 ```
 
-- Also check:
-  - Audio element playbackRate remains 1.0.
-  - Output device selection (switch to Default to clear bad sink).
-  - Stop → Start the agent to force a new session; ensure `session.updated` appears before first response.
-
-
+- Also check: playbackRate = 1.0; output device set to default; Stop → Start to reset session.
