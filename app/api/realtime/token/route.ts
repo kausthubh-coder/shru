@@ -1,12 +1,29 @@
 import { NextResponse } from "next/server";
 
-function getConvexSiteURL(): string {
-  const site =
-    process.env.CONVEX_SITE_URL ?? process.env.NEXT_PUBLIC_CONVEX_SITE_URL;
-  if (!site) {
-    throw new Error("CONVEX_SITE_URL is not configured");
+function toSiteUrl(url: string | undefined | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    // If user passed the cloud URL, rewrite to site.
+    const host = u.host.replace("convex.cloud", "convex.site");
+    return `${u.protocol}//${host}`;
+  } catch {
+    return null;
   }
-  return site.replace(/\/$/, "");
+}
+
+function getConvexSiteURL(): string {
+  const explicit =
+    process.env.CONVEX_SITE_URL ?? process.env.NEXT_PUBLIC_CONVEX_SITE_URL;
+  const cloudish = process.env.NEXT_PUBLIC_CONVEX_URL;
+  const derived = toSiteUrl(cloudish);
+  const chosen = explicit ?? derived;
+  if (!chosen) {
+    throw new Error(
+      "Convex site URL not configured. Set CONVEX_SITE_URL or NEXT_PUBLIC_CONVEX_SITE_URL (or NEXT_PUBLIC_CONVEX_URL).",
+    );
+  }
+  return chosen.replace(/\/$/, "");
 }
 
 export async function GET() {
@@ -34,5 +51,6 @@ export async function GET() {
     );
   }
 }
+
 
 

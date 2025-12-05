@@ -38,7 +38,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${dmSerif.variable} antialiased bg-grid min-h-screen`}
       >
-        <ClerkProvider dynamic>
+        <ClerkProvider dynamic waitlistUrl="/waitlist">
           <ConvexClientProvider>{children}</ConvexClientProvider>
         </ClerkProvider>
       </body>

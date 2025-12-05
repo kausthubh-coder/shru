@@ -44,12 +44,25 @@ export default function Dashboard() {
     );
   };
 
+  const isFormValid = !isCreating && newSessionName.trim().length > 0 && selectedSpaces.length > 0;
+
   return (
-    <div className="max-w-5xl mx-auto w-full">
+    <div className="max-w-5xl mx-auto w-full relative">
+      {/* Graph Paper Grid Background - Scoped to Dashboard Area */}
+      <div className="absolute inset-0 -z-10 pointer-events-none">
+        <div 
+          className="absolute inset-0 opacity-10" 
+          style={{
+            backgroundImage: `linear-gradient(#000000 1px, transparent 1px), linear-gradient(90deg, #000000 1px, transparent 1px)`,
+            backgroundSize: '24px 24px'
+          }}
+        />
+      </div>
+
       <div className="grid gap-8 md:grid-cols-2">
         {/* Create New Session Card */}
-        <div className="bg-[#F2F1EA] p-6 rounded-xl border border-black/5 shadow-sm">
-          <h2 className="text-2xl font-serif mb-6">New Session</h2>
+        <div className="bg-[#F2F1EA] p-6 rounded-xl border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+          <h2 className="text-2xl font-serif mb-6 text-black font-bold">New Session</h2>
           <form onSubmit={handleCreate} className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -60,7 +73,7 @@ export default function Dashboard() {
                 value={newSessionName}
                 onChange={(e) => setNewSessionName(e.target.value)}
                 placeholder="e.g., Physics Study Group"
-                className="w-full px-4 py-3 bg-white border border-black/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-black/5 transition-all"
+                className="w-full px-4 py-3 bg-white border-2 border-black rounded-lg focus:outline-none focus:ring-2 focus:ring-black/20 focus:border-black transition-all"
                 required
               />
             </div>
@@ -73,17 +86,17 @@ export default function Dashboard() {
                 {AVAILABLE_SPACES.map((space) => (
                   <label
                     key={space.id}
-                    className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer border transition-all ${
+                    className={`flex items-center space-x-3 p-3 rounded-lg cursor-pointer border-2 transition-all duration-200 ${
                       selectedSpaces.includes(space.id)
-                        ? "bg-white border-black/20 shadow-sm"
-                        : "border-transparent hover:bg-black/5"
+                        ? "bg-white border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                        : "border-transparent hover:bg-black/5 hover:border-black/10"
                     }`}
                   >
                     <input
                       type="checkbox"
                       checked={selectedSpaces.includes(space.id)}
                       onChange={() => toggleSpace(space.id)}
-                      className="h-5 w-5 rounded border-gray-300 text-black focus:ring-black/20"
+                      className="h-5 w-5 rounded border-2 border-gray-400 text-black focus:ring-black/20"
                     />
                     <div>
                       <div className="font-medium text-gray-900">
@@ -100,12 +113,12 @@ export default function Dashboard() {
 
             <button
               type="submit"
-              disabled={
-                isCreating ||
-                !newSessionName.trim() ||
-                selectedSpaces.length === 0
-              }
-              className="w-full py-3 px-4 bg-[#1A1A1A] text-[#F2F1EA] rounded-lg font-medium hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center"
+              disabled={!isFormValid}
+              className={`w-full py-3 px-4 border-2 border-black rounded-lg font-medium transition-all duration-300 flex justify-center items-center ${
+                isFormValid 
+                  ? "bg-black text-white hover:bg-gray-900 hover:-translate-y-0.5 hover:shadow-lg" 
+                  : "bg-[#D6D1C4] text-gray-500 cursor-not-allowed border-black/20"
+              }`}
             >
               {isCreating ? "Creating..." : "Create Session"}
             </button>
@@ -114,11 +127,11 @@ export default function Dashboard() {
 
         {/* Session List */}
         <div className="space-y-6">
-          <h2 className="text-2xl font-serif">Recent Sessions</h2>
+          <h2 className="text-2xl font-serif text-black font-bold">Recent Sessions</h2>
           {sessions === undefined ? (
             <div className="text-gray-500 animate-pulse">Loading...</div>
           ) : sessions.length === 0 ? (
-            <div className="text-gray-500 italic bg-[#F2F1EA] p-8 rounded-xl border border-black/5 text-center">
+            <div className="text-gray-500 italic bg-[#F2F1EA] p-8 rounded-xl border-2 border-black border-dashed text-center">
               No sessions yet. Create one to get started.
             </div>
           ) : (
@@ -127,13 +140,13 @@ export default function Dashboard() {
                 <div
                   key={session._id}
                   onClick={() => router.push(`/session/${session._id}`)}
-                  className="group bg-[#F2F1EA] p-5 rounded-xl border border-black/5 hover:border-black/20 cursor-pointer transition-all hover:shadow-md"
+                  className="group bg-[#F2F1EA] p-5 rounded-xl border-2 border-black hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] cursor-pointer transition-all duration-200"
                 >
                   <div className="flex justify-between items-start mb-2">
                     <div className="font-medium text-xl text-gray-900 font-serif">
                       {session.title}
                     </div>
-                    <div className="text-xs bg-white px-2 py-1 rounded border border-black/5 text-gray-500">
+                    <div className="text-xs bg-white px-2 py-1 rounded border border-black text-gray-500 font-mono">
                       {new Date(session.createdAt).toLocaleDateString()}
                     </div>
                   </div>
@@ -141,7 +154,7 @@ export default function Dashboard() {
                     {session.spaceTypes?.map((type: string) => (
                       <span
                         key={type}
-                        className="text-xs px-2 py-1 bg-white/50 rounded text-gray-600 border border-black/5"
+                        className="text-xs px-2 py-1 bg-white rounded text-black border border-black font-medium"
                       >
                         {type}
                       </span>
