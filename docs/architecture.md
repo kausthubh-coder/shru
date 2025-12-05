@@ -71,6 +71,10 @@ OpenAI
 - `app/api/realtime/token/route.ts` — Next.js proxy to Convex token endpoint
 - Legacy prototype: `app/test-app/**` (see `docs/test-app.md`)
 
+## Performance notes (landing → dashboard)
+- `app/page.tsx` dynamically imports `components/Dashboard.tsx` to keep the landing bundle small for unauthenticated users.
+- `components/spaces/SpaceRegistry.tsx` dynamically imports each space component (Whiteboard/tldraw, IDE/Monaco, Lesson) so the dashboard checklist does not pull heavy editor/whiteboard bundles until a session is opened.
+
 ## Extending
 
 - Add new spaces or tables in `convex/schema.ts`; wire CRUD in `convex/spaces.ts`.

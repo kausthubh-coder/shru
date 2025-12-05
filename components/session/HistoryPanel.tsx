@@ -4,14 +4,23 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 
+type SpaceVersion = {
+    _id: Id<"sessions">;
+    createdAt: number;
+    createdBy: string;
+    content: any;
+};
+
 interface HistoryPanelProps {
-    spaceId: Id<"spaces">;
+    spaceId: Id<"sessions">;
     onClose: () => void;
     onRestore: (content: any) => void;
 }
 
 export function HistoryPanel({ spaceId, onClose, onRestore }: HistoryPanelProps) {
-    const versions = useQuery(api.spaces.listVersions, { spaceId });
+    const versions = useQuery(api.spaces.listVersions, { spaceId }) as
+        | SpaceVersion[]
+        | undefined;
     const saveVersion = useMutation(api.spaces.saveVersion);
 
     const handleSaveNow = async () => {
