@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react/no-unescaped-entities */
 
 import React, { useEffect } from "react";
 import { usePageNav } from "./components/pageNavContext";
@@ -50,7 +51,7 @@ function PreloadSection() {
       goNext();
     }, 1500);
     return () => clearTimeout(t);
-  }, [router]);
+  }, [router, goNext]);
   return (
     <Section>
       <GridBackground />

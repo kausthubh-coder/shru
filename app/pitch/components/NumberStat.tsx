@@ -40,7 +40,7 @@ export default function NumberStat({ value, suffix = "", durationMs = 800, class
     }, { threshold: 0.6 });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [value, durationMs, hasAnimated]);
+  }, [value, durationMs, hasAnimated, reduced]);
 
   return (
     <motion.div ref={ref} className={className} aria-label={`${value}${suffix}`} initial={{ scale: 0.95, opacity: 0 }} whileInView={{ scale: 1, opacity: 1 }} viewport={{ once: true }} transition={{ type: "spring", stiffness: 220 }}>

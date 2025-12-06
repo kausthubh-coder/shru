@@ -4,36 +4,6 @@ import { AgentRuntime, ToolResult, createWrapExecute } from "@/types/toolContrac
 export function buildIdeTools(runtime: AgentRuntime) {
   const wrapExecute = createWrapExecute(runtime);
 
-  const ide_create_file = {
-    name: "ide_create_file",
-    description: "Create a new file in the IDE workspace.",
-    parameters: z.object({ name: z.string(), language: z.string().default("typescript"), content: z.string().default("") }),
-    execute: wrapExecute("ide_create_file", async ({ name, language, content }: any): Promise<ToolResult<string>> => {
-      runtime.ide.createFile(name, language, content ?? "");
-      return { status: 'ok', summary: `created ${name}` };
-    }),
-  } as const;
-
-  const ide_set_active = {
-    name: "ide_set_active",
-    description: "Set the active file by name.",
-    parameters: z.object({ name: z.string() }),
-    execute: wrapExecute("ide_set_active", async ({ name }: any): Promise<ToolResult<string>> => {
-      const ok = runtime.ide.setActiveByName(name);
-      return ok ? { status: 'ok', summary: `active ${name}` } : { status: 'error', summary: `not found ${name}` };
-    }),
-  } as const;
-
-  const ide_update_content = {
-    name: "ide_update_content",
-    description: "Replace the active file's content.",
-    parameters: z.object({ content: z.string() }),
-    execute: wrapExecute("ide_update_content", async ({ content }: any): Promise<ToolResult<string>> => {
-      runtime.ide.updateActiveContent(String(content ?? ""));
-      return { status: 'ok', summary: `updated content (${(content ?? "").length} chars)` };
-    }),
-  } as const;
-
   const ide_get_context = {
     name: "ide_get_context",
     description: "Get JSON of files and active file.",
@@ -55,7 +25,6 @@ export function buildIdeTools(runtime: AgentRuntime) {
     }),
   } as const;
 
-  const EditRange = z.object({ start: z.number(), end: z.number() });
   const LineEdit = z.object({
     type: z.literal("line"),
     range: z.object({ startLine: z.number(), endLine: z.number() }),
@@ -72,12 +41,12 @@ export function buildIdeTools(runtime: AgentRuntime) {
     name: "ide_apply_edits",
     description: "Apply precise edits to the active file. Supports line or char ranges.",
     parameters: z.object({ edits: z.array(Edit) }),
-    execute: wrapExecute("ide_apply_edits", async ({ edits }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("ide_apply_edits", async ({ edits }: { edits: Array<{ type: string; range: { start?: number; end?: number; startLine?: number; endLine?: number }; text?: string }> }): Promise<ToolResult<string>> => {
       const snap = runtime.ide.getActiveContent();
       if (!snap) return { status: 'error', summary: 'no-active-file' };
       let content = String(snap.content ?? "");
       try {
-        for (const e of edits as Array<any>) {
+        for (const e of edits) {
           if (e.type === 'char') {
             const start = Math.max(0, Math.min(content.length, Number(e.range?.start ?? 0)));
             const end = Math.max(start, Math.min(content.length, Number(e.range?.end ?? start)));
@@ -95,8 +64,8 @@ export function buildIdeTools(runtime: AgentRuntime) {
         }
         runtime.ide.updateActiveContent(content);
         return { status: 'ok', summary: `applied ${edits.length} edits`, data: String(content.length) };
-      } catch (err: any) {
-        return { status: 'error', summary: String(err?.message ?? err) };
+      } catch (err: unknown) {
+        return { status: 'error', summary: err instanceof Error ? err.message : String(err) };
       }
     }),
   } as const;
@@ -114,8 +83,8 @@ export function buildIdeTools(runtime: AgentRuntime) {
           summary, 
           data: JSON.stringify(result) 
         };
-      } catch (err: any) {
-        return { status: 'error', summary: String(err?.message ?? err) };
+      } catch (err: unknown) {
+        return { status: 'error', summary: err instanceof Error ? err.message : String(err) };
       }
     }),
   } as const;

@@ -13,15 +13,14 @@ import { SpaceProps } from "@/types/space";
 export default function WhiteboardSpace({
     initialContent,
     onContentChange,
-    isActive,
     readOnly,
 }: SpaceProps) {
     const [editor, setEditor] = useState<Editor | null>(null);
     const lastAppliedSnapshotHash = useRef<string | null>(null);
-    const pendingSnapshotRef = useRef<any>(null);
+    const pendingSnapshotRef = useRef<unknown>(null);
     const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const applySnapshot = useCallback((snapshot: any) => {
+    const applySnapshot = useCallback((snapshot: unknown) => {
         if (!editor || !snapshot) return;
         try {
             loadSnapshot(editor.store, snapshot);
@@ -83,13 +82,13 @@ export default function WhiteboardSpace({
         <div className="w-full h-full relative">
             <Tldraw
                 onMount={handleMount}
-                options={{ maxPages: 1 } as any}
+                options={{ maxPages: 1 }}
             />
         </div>
     );
 }
 
-function snapshotHash(snapshot: any) {
+function snapshotHash(snapshot: unknown) {
     try {
         return JSON.stringify(snapshot);
     } catch {

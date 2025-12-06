@@ -18,7 +18,6 @@ const DEFAULT_LESSON_YAML = [
 export default function LessonSpace({
   initialContent,
   onContentChange,
-  isActive,
   readOnly,
 }: SpaceProps<LessonContent>) {
   const initialYaml = useMemo(() => {

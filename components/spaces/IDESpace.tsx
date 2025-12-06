@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { SpaceProps } from "@/types/space";
 import { loadPyodideOnce } from "@/lib/pyodide";
@@ -25,7 +25,6 @@ const DEFAULT_FILES: IdeContent["files"] = [
 export default function IDESpace({
     initialContent,
     onContentChange,
-    isActive,
     readOnly,
 }: SpaceProps<IdeContent>) {
     const initialFiles = initialContent?.files?.length ? initialContent.files : DEFAULT_FILES;
@@ -71,8 +70,8 @@ export default function IDESpace({
             pyodide.setStdout({ batched: (s: string) => setOutput((prev) => [...prev, s]) });
             pyodide.setStderr({ batched: (s: string) => setOutput((prev) => [...prev, `Error: ${s}`]) });
             await pyodide.runPythonAsync(activeFile.content);
-        } catch (err: any) {
-            setOutput((prev) => [...prev, `Runtime Error: ${err.message}`]);
+        } catch (err: unknown) {
+            setOutput((prev) => [...prev, `Runtime Error: ${err instanceof Error ? err.message : String(err)}`]);
         } finally {
             setIsRunning(false);
         }

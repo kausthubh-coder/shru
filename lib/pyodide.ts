@@ -1,12 +1,18 @@
 "use client";
 
+type PyodideInstance = {
+    setStdout: (opts: { batched: (s: string) => void }) => void;
+    setStderr: (opts: { batched: (s: string) => void }) => void;
+    runPythonAsync: (code: string) => Promise<unknown>;
+};
+
 declare global {
     interface Window {
-        loadPyodide?: (opts: { indexURL: string }) => Promise<any>;
+        loadPyodide?: (opts: { indexURL: string }) => Promise<PyodideInstance>;
     }
 }
 
-let pyodideInstancePromise: Promise<any> | null = null;
+let pyodideInstancePromise: Promise<PyodideInstance> | null = null;
 
 export async function loadPyodideOnce() {
     if (!pyodideInstancePromise) {

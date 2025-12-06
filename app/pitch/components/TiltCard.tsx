@@ -28,7 +28,8 @@ export default function TiltCard({ children, className, maxTilt = 8 }: TiltCardP
   };
 
   const onLeave = () => {
-    dx.set(0); dy.set(0);
+    dx.set(0);
+    dy.set(0);
   };
 
   if (reduced) {
@@ -41,7 +42,7 @@ export default function TiltCard({ children, className, maxTilt = 8 }: TiltCardP
     <motion.div
       ref={ref}
       className={className}
-      style={{ rotateX: rx as any, rotateY: ry as any, transformStyle: "preserve-3d" }}
+      style={{ rotateX: rx, rotateY: ry, transformStyle: "preserve-3d" }}
       onMouseMove={onMove}
       onMouseLeave={onLeave}
       transition={{ type: "spring", stiffness: 200, damping: 20 }}

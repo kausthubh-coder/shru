@@ -39,7 +39,7 @@ const DEFAULT_IDE_FILE = {
 const DEFAULT_NOTES_DOC: NotesDocT = {
   title: "Notes",
   version: 1,
-  blocks: [{ type: "text", md: "Write here…" } as any],
+  blocks: [{ type: "text", md: "Write here…" }],
 };
 
 const DEFAULT_NOTES_YAML = serializeNotesYaml(DEFAULT_NOTES_DOC);
@@ -57,13 +57,13 @@ export default function SessionWorkspace({
   sessionId: Id<"sessions">;
   enabledTools?: ("whiteboard" | "code" | "notes")[];
 }) {
-  const editorRef = useRef<any>(null);
-  const agentRef = useRef<any>(null);
+  const editorRef = useRef<unknown>(null);
+  const agentRef = useRef<unknown>(null);
   const [editorReady, setEditorReady] = useState(false);
 
   // Voice agent/session state
-  const sessionRef = useRef<any>(null);
-  const sessionHandleRef = useRef<any>(null);
+  const sessionRef = useRef<ReturnType<typeof createRealtimeSessionHandle> | null>(null);
+  const sessionHandleRef = useRef<ReturnType<typeof createRealtimeSessionHandle> | null>(null);
   const [agentStatus, setAgentStatus] = useState<"disconnected"|"connecting"|"connected">("disconnected");
   const [toolBusy, setToolBusy] = useState(false);
   const [logs, setLogs] = useState<Array<string>>([]);
@@ -72,8 +72,8 @@ export default function SessionWorkspace({
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
   const [inputLevel, setInputLevel] = useState(0);
-  const audioCtxRef = useRef<any>(null);
-  const analyserRef = useRef<any>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
   const unsubTransportRef = useRef<null | (() => void)>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -81,16 +81,16 @@ export default function SessionWorkspace({
   const [muted, setMuted] = useState(false);
   const waitingResponseRef = useRef<boolean>(false);
   const sessionReadyRef = useRef<boolean>(false);
-  const currentTurnRef = useRef<any | null>(null);
+  const currentTurnRef = useRef<unknown | null>(null);
   const lastLangAssertRef = useRef<number>(0);
-  const sessionTurnsRef = useRef<Array<any>>([]);
+  const sessionTurnsRef = useRef<Array<unknown>>([]);
   const [inputDevices, setInputDevices] = useState<Array<MediaDeviceInfo>>([]);
   const [outputDevices, setOutputDevices] = useState<Array<MediaDeviceInfo>>([]);
   const [selectedInputId, setSelectedInputId] = useState<string>("");
   const [selectedOutputId, setSelectedOutputId] = useState<string>("");
   const [pushToTalk, setPushToTalk] = useState<boolean>(false);
   const [vadEagerness, setVadEagerness] = useState<'low'|'medium'|'high'>('medium');
-  const pendingWhiteboardSnapshotRef = useRef<any>(null);
+  const pendingWhiteboardSnapshotRef = useRef<unknown>(null);
   const whiteboardSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSyncedWhiteboardHash = useRef<string | null>(null);
   const whiteboardUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -220,7 +220,7 @@ export default function SessionWorkspace({
   }, [debugContext, appendLog]);
 
   // Debug: structured tool call events
-  type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'|'error'; args?: any; result?: any; ms?: number; err?: string };
+type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'|'error'; args?: unknown; result?: unknown; ms?: number; err?: string };
   const [toolEvents, setToolEvents] = useState<Array<ToolEvent>>([]);
   const [languageLock] = useState<boolean>(true);
 

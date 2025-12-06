@@ -8,7 +8,7 @@ export type RealtimeConnectParams = {
   selectedOutputDeviceId?: string;
   audioElement?: HTMLAudioElement | null;
   appendLog?: (line: string) => void;
-  tools?: Array<any>;
+  tools?: Array<unknown>;
   agentName?: string;
 };
 
@@ -36,9 +36,9 @@ export interface RealtimeSessionHandle {
 }
 
 type RealtimeModules = {
-  RealtimeAgent: any;
-  RealtimeSession: any;
-  OpenAIRealtimeWebRTC: any;
+  RealtimeAgent: unknown;
+  RealtimeSession: unknown;
+  OpenAIRealtimeWebRTC: unknown;
 };
 
 function isClient(): boolean {
@@ -47,8 +47,8 @@ function isClient(): boolean {
 
 export function createRealtimeSessionHandle(): RealtimeSessionHandle {
   let modules: RealtimeModules | null = null;
-  let session: any | null = null;
-  let transport: any | null = null;
+  let session: unknown | null = null;
+  let transport: unknown | null = null;
   let mediaStream: MediaStream | null = null;
   let audioEl: HTMLAudioElement | null = null;
   let onAnyHandler: ((evt: unknown) => void) | null = null;
@@ -62,16 +62,16 @@ export function createRealtimeSessionHandle(): RealtimeSessionHandle {
     if (!isClient()) throw new Error("Realtime modules must be loaded on client");
     const mod = await import("@openai/agents/realtime");
     modules = {
-      RealtimeAgent: (mod as any).RealtimeAgent,
-      RealtimeSession: (mod as any).RealtimeSession,
-      OpenAIRealtimeWebRTC: (mod as any).OpenAIRealtimeWebRTC,
+      RealtimeAgent: (mod as Record<string, unknown>).RealtimeAgent,
+      RealtimeSession: (mod as Record<string, unknown>).RealtimeSession,
+      OpenAIRealtimeWebRTC: (mod as Record<string, unknown>).OpenAIRealtimeWebRTC,
     };
     return modules;
   }
 
   async function getUserMedia(selectedInputDeviceId?: string): Promise<MediaStream> {
     const constraints: MediaStreamConstraints = selectedInputDeviceId
-      ? { audio: { deviceId: { exact: selectedInputDeviceId } as any } }
+      ? { audio: { deviceId: { exact: selectedInputDeviceId } } }
       : { audio: true };
     return await navigator.mediaDevices.getUserMedia(constraints);
   }
@@ -79,7 +79,7 @@ export function createRealtimeSessionHandle(): RealtimeSessionHandle {
   async function setSinkIdIfSupported(el: HTMLAudioElement, deviceId?: string) {
     try {
       if (!deviceId) return;
-      const anyEl: any = el as any;
+      const anyEl = el as HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> };
       if (typeof anyEl.setSinkId === "function") {
         await anyEl.setSinkId(deviceId);
       }
@@ -96,7 +96,10 @@ export function createRealtimeSessionHandle(): RealtimeSessionHandle {
     // Media
     mediaStream = await getUserMedia(selectedInputDeviceId);
     audioEl = audioElement ?? document.createElement("audio");
-    try { audioEl.autoplay = true; (audioEl as any).playsInline = true; } catch {}
+    try { 
+      audioEl.autoplay = true; 
+      (audioEl as HTMLAudioElement & { playsInline?: boolean }).playsInline = true; 
+    } catch {}
 
     // Transport
     transport = new OpenAIRealtimeWebRTC({ mediaStream, audioElement: audioEl });
@@ -150,19 +153,28 @@ export function createRealtimeSessionHandle(): RealtimeSessionHandle {
         },
         instructions: params.instructions ?? undefined,
       },
-    } as any);
+    });
   }
 
   async function disconnect(): Promise<void> {
     try { await session?.disconnect?.(); } catch {}
-    try { (session as any)?.transport?.close?.(); } catch {}
+    try { 
+      const s = session as { transport?: { close?: () => void } };
+      s?.transport?.close?.(); 
+    } catch {}
     session = null;
     transport = null;
     // Stop mic tracks
     try { mediaStream?.getTracks().forEach((t) => { try { t.stop(); } catch {} }); } catch {}
     mediaStream = null;
     // Pause audio
-    try { if (audioEl) { await audioEl.pause?.(); audioEl.muted = true; (audioEl as any).srcObject = null; } } catch {}
+    try { 
+      if (audioEl) { 
+        await audioEl.pause?.(); 
+        audioEl.muted = true; 
+        (audioEl as HTMLAudioElement & { srcObject?: MediaStream | null }).srcObject = null; 
+      } 
+    } catch {}
   }
 
   function sendEvent(evt: unknown) {

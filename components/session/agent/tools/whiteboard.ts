@@ -24,7 +24,7 @@ const ALLOWED_GEOS = [
   "heart",
 ];
 
-function coerceGeo(input: any, log?: (s: string) => void): string {
+function coerceGeo(input: unknown, log?: (s: string) => void): string {
   const g0 = typeof input === 'string' ? input.toLowerCase() : '';
   let g = g0;
   // common synonyms → allowed
@@ -57,7 +57,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_delete",
     description: "Delete a shape by simple id.",
     parameters: z.object({ shapeId: z.string() }),
-    execute: wrapExecute("agent_delete", async ({ shapeId }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_delete", async ({ shapeId }: { shapeId: string }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "delete", intent: "Delete shape", shapeId });
       return { status: 'ok', summary: `deleted ${shapeId}` };
     }),
@@ -74,7 +74,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
       h: z.number().default(60),
       color: z.string().default("black"),
     }),
-    execute: wrapExecute("agent_create_text", async ({ x, y, text, w, h, color }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_create_text", async ({ x, y, text, w, h, color }: { x: number; y: number; text: string; w: number; h: number; color: string }): Promise<ToolResult<string>> => {
       const nx = (typeof x === 'number' && isFinite(x)) ? x : null;
       const ny = (typeof y === 'number' && isFinite(y)) ? y : null;
       const nw = (typeof w === 'number' && isFinite(w)) ? w : 220;
@@ -123,7 +123,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
       color: z.string().default("black"),
       fill: z.enum(["none","tint","background","solid","pattern"]).default("none"),
     }),
-    execute: wrapExecute("agent_create_shape", async ({ geo, x, y, w, h, text, color, fill }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_create_shape", async ({ geo, x, y, w, h, color, fill }: { geo: string; x: number; y: number; w: number; h: number; text?: string | null; color: string; fill: "none" | "tint" | "background" | "solid" | "pattern" }): Promise<ToolResult<string>> => {
       const normalizedGeo = coerceGeo(geo, runtime.appendLog);
       const nx = (typeof x === 'number' && isFinite(x)) ? x : null;
       const ny = (typeof y === 'number' && isFinite(y)) ? y : null;
@@ -165,7 +165,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
       color: z.string().default("black"),
       fill: z.enum(["none","tint","background","solid","pattern"]).default("none"),
     }),
-    execute: wrapExecute("agent_create", async ({ geo, x, y, w, h, text, color, fill }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_create", async ({ geo, x, y, w, h, color, fill }: { geo: string; x: number; y: number; w: number; h: number; text?: string | null; color: string; fill: "none" | "tint" | "background" | "solid" | "pattern" }): Promise<ToolResult<string>> => {
       const normalizedGeo = coerceGeo(geo, runtime.appendLog);
       const nx = (typeof x === 'number' && isFinite(x)) ? x : null;
       const ny = (typeof y === 'number' && isFinite(y)) ? y : null;
@@ -186,7 +186,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_move",
     description: "Move a shape by simple id to a new position.",
     parameters: z.object({ shapeId: z.string(), x: z.number(), y: z.number() }),
-    execute: wrapExecute("agent_move", async ({ shapeId, x, y }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_move", async ({ shapeId, x, y }: { shapeId: string; x: number; y: number }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "move", intent: "Move shape", shapeId, x, y });
       return { status: 'ok', summary: `moved ${shapeId} to (${x},${y})` };
     }),
@@ -196,7 +196,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_label",
     description: "Set or change a shape's label/text.",
     parameters: z.object({ shapeId: z.string(), text: z.string() }),
-    execute: wrapExecute("agent_label", async ({ shapeId, text }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_label", async ({ shapeId, text }: { shapeId: string; text: string }): Promise<ToolResult<string>> => {
       runtime.appendLog?.(`[label] requested label change shapeId=${shapeId} text=${String(text ?? '')}`);
       // If target is non-text, create a nearby text shape instead of no-op
       try {
@@ -228,7 +228,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_align",
     description: "Align shapes by ids.",
     parameters: z.object({ alignment: z.enum(["top","bottom","left","right","center-horizontal","center-vertical"]), shapeIds: z.array(z.string()), gap: z.number().default(0) }),
-    execute: wrapExecute("agent_align", async ({ alignment, shapeIds, gap }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_align", async ({ alignment, shapeIds, gap }: { alignment: "top" | "bottom" | "left" | "right" | "center-horizontal" | "center-vertical"; shapeIds: string[]; gap: number }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "align", intent: `Align ${shapeIds.length} shapes`, alignment, shapeIds, gap });
       return { status: 'ok', summary: `aligned ${shapeIds.length} shapes (${alignment})` };
     }),
@@ -238,7 +238,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_distribute",
     description: "Distribute shapes.",
     parameters: z.object({ direction: z.enum(["horizontal","vertical"]), shapeIds: z.array(z.string()), gap: z.number().default(0) }),
-    execute: wrapExecute("agent_distribute", async ({ direction, shapeIds, gap }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_distribute", async ({ direction, shapeIds, gap }: { direction: "horizontal" | "vertical"; shapeIds: string[]; gap: number }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "distribute", intent: `Distribute ${shapeIds.length} shapes`, direction, shapeIds, gap });
       return { status: 'ok', summary: `distributed ${shapeIds.length} shapes (${direction})` };
     }),
@@ -248,7 +248,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_stack",
     description: "Stack shapes.",
     parameters: z.object({ direction: z.enum(["vertical","horizontal"]), shapeIds: z.array(z.string()), gap: z.number().default(0.1) }),
-    execute: wrapExecute("agent_stack", async ({ direction, shapeIds, gap }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_stack", async ({ direction, shapeIds, gap }: { direction: "vertical" | "horizontal"; shapeIds: string[]; gap: number }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "stack", intent: `Stack ${shapeIds.length} shapes`, direction, shapeIds, gap });
       return { status: 'ok', summary: `stacked ${shapeIds.length} shapes (${direction})` };
     }),
@@ -258,7 +258,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_rotate",
     description: "Rotate shapes.",
     parameters: z.object({ shapeIds: z.array(z.string()), degrees: z.number(), originX: z.number(), originY: z.number() }),
-    execute: wrapExecute("agent_rotate", async ({ shapeIds, degrees, originX, originY }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_rotate", async ({ shapeIds, degrees, originX, originY }: { shapeIds: string[]; degrees: number; originX: number; originY: number }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "rotate", intent: `Rotate ${shapeIds.length} shapes`, shapeIds, degrees, originX, originY, centerY: 0 });
       return { status: 'ok', summary: `rotated ${shapeIds.length} shapes by ${degrees}°` };
     }),
@@ -268,7 +268,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_resize",
     description: "Resize shapes.",
     parameters: z.object({ shapeIds: z.array(z.string()), scaleX: z.number(), scaleY: z.number(), originX: z.number(), originY: z.number() }),
-    execute: wrapExecute("agent_resize", async ({ shapeIds, scaleX, scaleY, originX, originY }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_resize", async ({ shapeIds, scaleX, scaleY, originX, originY }: { shapeIds: string[]; scaleX: number; scaleY: number; originX: number; originY: number }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "resize", intent: `Resize ${shapeIds.length} shapes`, shapeIds, scaleX, scaleY, originX, originY });
       return { status: 'ok', summary: `resized ${shapeIds.length} shapes` };
     }),
@@ -278,7 +278,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_bring_to_front",
     description: "Bring shapes to front.",
     parameters: z.object({ shapeIds: z.array(z.string()) }),
-    execute: wrapExecute("agent_bring_to_front", async ({ shapeIds }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_bring_to_front", async ({ shapeIds }: { shapeIds: string[] }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "bringToFront", intent: `Bring to front`, shapeIds });
       return { status: 'ok', summary: `brought ${shapeIds.length} to front` };
     }),
@@ -288,7 +288,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_send_to_back",
     description: "Send shapes to back.",
     parameters: z.object({ shapeIds: z.array(z.string()) }),
-    execute: wrapExecute("agent_send_to_back", async ({ shapeIds }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_send_to_back", async ({ shapeIds }: { shapeIds: string[] }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "sendToBack", intent: "Send to back", shapeIds });
       return { status: 'ok', summary: `sent ${shapeIds.length} to back` };
     }),
@@ -298,7 +298,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_place",
     description: "Place a shape relative to another.",
     parameters: z.object({ shapeId: z.string(), referenceShapeId: z.string(), side: z.enum(["top","bottom","left","right"]), align: z.enum(["start","center","end"]), sideOffset: z.number().default(0), alignOffset: z.number().default(0) }),
-    execute: wrapExecute("agent_place", async ({ shapeId, referenceShapeId, side, align, sideOffset, alignOffset }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_place", async ({ shapeId, referenceShapeId, side, align, sideOffset, alignOffset }: { shapeId: string; referenceShapeId: string; side: "top" | "bottom" | "left" | "right"; align: "start" | "center" | "end"; sideOffset: number; alignOffset: number }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "place", intent: "Place shape", shapeId, referenceShapeId, side, align, sideOffset, alignOffset });
       return { status: 'ok', summary: `placed ${shapeId} ${side} of ${referenceShapeId}` };
     }),
@@ -308,7 +308,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_pen",
     description: "Draw a path with the pen.",
     parameters: z.object({ points: z.array(z.object({ x: z.number(), y: z.number() })), style: z.enum(["smooth","straight"]).default("smooth"), closed: z.boolean().default(false), color: z.string().default("blue"), fill: z.enum(["none","tint","background","solid","pattern"]).default("none") }),
-    execute: wrapExecute("agent_pen", async ({ points, style, closed, color, fill }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_pen", async ({ points, style, closed, color, fill }: { points: Array<{ x: number; y: number }>; style: "smooth" | "straight"; closed: boolean; color: string; fill: "none" | "tint" | "background" | "solid" | "pattern" }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "pen", intent: "Draw path", points, style, closed, color, fill });
       return { status: 'ok', summary: `drew ${points.length} points` };
     }),
@@ -328,11 +328,11 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
       h: z.number().nullable().optional(),
       geo: z.string().nullable().optional(),
     }),
-    execute: wrapExecute("agent_update", async ({ shapeId, text, color, fill, x, y, w, h, geo }: any): Promise<ToolResult<string>> => {
-      const update: any = { shapeId };
+    execute: wrapExecute("agent_update", async ({ shapeId, text, color, fill, x, y, w, h, geo }: { shapeId: string; text?: string | null; color?: string | null; fill?: "none" | "tint" | "background" | "solid" | "pattern" | null; x?: number | null; y?: number | null; w?: number | null; h?: number | null; geo?: string | null }): Promise<ToolResult<string>> => {
+      const update: Record<string, unknown> = { shapeId };
       if (typeof text !== 'undefined' && text !== null) update.label = String(text);
       if (typeof color !== 'undefined' && color !== null) update.color = String(color);
-      if (typeof fill !== 'undefined' && fill !== null) update.fill = fill as any;
+      if (typeof fill !== 'undefined' && fill !== null) update.fill = fill;
       if (typeof x === 'number') update.x = x;
       if (typeof y === 'number') update.y = y;
       if (typeof w === 'number') update.w = w;
@@ -357,7 +357,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_send_view_image",
     description: "Capture the current viewport and attach to conversation.",
     parameters: z.object({ triggerResponse: z.boolean().default(true) }),
-    execute: wrapExecute("agent_send_view_image", async ({ triggerResponse }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_send_view_image", async ({ triggerResponse }: { triggerResponse: boolean }): Promise<ToolResult<string>> => {
       const url = await runtime.whiteboard.getScreenshot();
       if (!url || url === "null") return { status: 'error', summary: 'no-visible-shapes' };
       runtime.appendLog?.(`[transport] conversation.item.create (image length=${url.length})`);
@@ -387,7 +387,7 @@ export function buildWhiteboardTools(runtime: AgentRuntime) {
     name: "agent_set_view",
     description: "Move the agent's viewport to bounds.",
     parameters: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
-    execute: wrapExecute("agent_set_view", async ({ x, y, w, h }: any): Promise<ToolResult<string>> => {
+    execute: wrapExecute("agent_set_view", async ({ x, y, w, h }: { x: number; y: number; w: number; h: number }): Promise<ToolResult<string>> => {
       await runtime.whiteboard.dispatchAction({ _type: "setMyView", intent: "Move camera", x, y, w, h });
       return { status: 'ok', summary: `viewport set (${x},${y},${w},${h})` };
     }),

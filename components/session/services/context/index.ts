@@ -19,9 +19,9 @@ function hashString(input: string): string {
 }
 
 export async function sendAutoContext(
-  editorRef: MutableRefObject<any>,
-  agentRef: MutableRefObject<any>,
-  sessionRef: MutableRefObject<any>,
+  editorRef: MutableRefObject<unknown>,
+  agentRef: MutableRefObject<unknown>,
+  sessionRef: MutableRefObject<unknown>,
   appendLog: (line: string) => void,
   setDebugContext: DebugSetter,
   triggerResponse: boolean = false,
@@ -59,7 +59,7 @@ export async function sendAutoContext(
       return 'noop';
     }
 
-    const content: Array<any> = [{ type: 'input_text', text }];
+    const content: Array<{ type: string; text?: string; image_url?: string }> = [{ type: 'input_text', text }];
     if (imageUrl && imageUrl !== 'null') content.push({ type: 'input_image', image_url: imageUrl });
 
     appendLog(`[transport] conversation.item.create (auto-context combined parts: text ${text.length} chars${imageUrl ? `, image length=${imageUrl.length}` : ''})`);
@@ -77,8 +77,8 @@ export async function sendAutoContext(
       transport.sendEvent({ type: 'response.create' });
     }
     return 'ok';
-  } catch (e: any) {
-    appendLog(`auto-context error: ${String(e?.message ?? e)}`);
+  } catch (e: unknown) {
+    appendLog(`auto-context error: ${e instanceof Error ? e.message : String(e)}`);
     return 'error';
   }
 }

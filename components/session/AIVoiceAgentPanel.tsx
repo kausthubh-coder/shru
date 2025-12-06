@@ -163,7 +163,7 @@ export function AIVoiceAgentPanel({
                   <input type="checkbox" className="accent-black" checked={pushToTalk} onChange={(e) => setPushToTalk(e.target.checked)} />
                 </div>
                 <label className="block text-[10px] text-slate-500 mb-1 px-1">VAD Sensitivity</label>
-                <select className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 focus:ring-2 focus:ring-black/5 outline-none" value={vadEagerness} onChange={(e) => setVadEagerness(e.target.value as any)}>
+                <select className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 focus:ring-2 focus:ring-black/5 outline-none" value={vadEagerness} onChange={(e) => setVadEagerness(e.target.value as "low" | "medium" | "high")}>
                   <option value="low">Low (Quiet env)</option>
                   <option value="medium">Medium</option>
                   <option value="high">High (Noisy env)</option>

@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
-import { parseNotesYaml, NotesDocT, BlockT } from "@/types/notesYaml";
+import { parseNotesYaml, BlockT } from "@/types/notesYaml";
 
 type NotesRendererProps = {
   yaml: string;
@@ -38,9 +38,10 @@ export function NotesRenderer({ yaml }: NotesRendererProps) {
           {doc.title}
         </h1>
       </div>
-      {doc.blocks.map((b, i) => (
-        <BlockView key={(b as any).id ?? i} block={b} />
-      ))}
+      {doc.blocks.map((b, i) => {
+        const blockId = (b as BlockT & { id?: string }).id ?? i;
+        return <BlockView key={blockId} block={b} />;
+      })}
     </div>
   );
 }

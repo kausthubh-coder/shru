@@ -99,7 +99,7 @@ export default function PageController({ sections }: PageControllerProps) {
     return () => {
       observer.disconnect();
     };
-  }, [sections.length]);
+  }, [sections.length, currentIndex]);
 
   // Track scrollTop for parallax consumers
   useEffect(() => {

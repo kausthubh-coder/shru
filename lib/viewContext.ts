@@ -1,35 +1,56 @@
 import { Box } from "tldraw";
 
 export type ViewContext = {
-  bounds: any;
-  blurryShapes: Array<any>;
-  peripheralClusters: Array<any>;
-  selectedShapes: Array<any>;
+  bounds: Box;
+  blurryShapes: Array<{ _type: string; shapeId: string; x: number; y: number; w: number; h: number; text: string; geo?: string; color?: string; fill?: string } | null>;
+  peripheralClusters: Array<unknown>;
+  selectedShapes: Array<{ _type: string; shapeId: string; x: number; y: number; w: number; h: number; text: string; geo?: string } | null>;
 };
 
-export function getViewContext(editor: any, agent: any): ViewContext {
+type EditorShape = {
+  id?: string;
+  type?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  props?: {
+    w?: number;
+    h?: number;
+    label?: string;
+    geo?: string;
+    color?: string;
+    fill?: string;
+  };
+};
+
+type Editor = {
+  getViewportPageBounds: () => Box;
+  getCurrentPageShapesSorted: () => Array<EditorShape>;
+  getShapeMaskedPageBounds: (shape: EditorShape) => Box | null;
+  getSelectedShapes: () => Array<EditorShape>;
+  toImage: (shapes: Array<EditorShape>, opts: { format: string; background: boolean; bounds: Box; padding: number; pixelRatio: number; scale: number }) => Promise<{ blob: Blob }>;
+};
+
+export function getViewContext(editor: Editor, agent: unknown): ViewContext {
   if (!editor || !agent) throw new Error("Editor/agent not ready");
   const viewport = editor.getViewportPageBounds();
   const bounds = viewport;
   const allShapes = editor.getCurrentPageShapesSorted();
-  const inView = allShapes.filter((s: any) => {
+  const inView = allShapes.filter((s) => {
     const b = editor.getShapeMaskedPageBounds(s);
     return b && b.collides(viewport);
   });
-  const outView = allShapes.filter((s: any) => {
-    const b = editor.getShapeMaskedPageBounds(s);
-    return b && !b.collides(viewport);
-  });
-  const blurryShapes = inView.map((s: any) => toBlurryShapeSummary(s)).filter(Boolean);
-  const peripheralClusters: Array<any> = []; // minimal stub; can be enhanced later
-  const selectedShapes = editor.getSelectedShapes().map((shape: any) => toSimpleShape(shape));
+  const blurryShapes = inView.map((s) => toBlurryShapeSummary(s)).filter((s): s is NonNullable<typeof s> => s !== null);
+  const peripheralClusters: Array<unknown> = []; // minimal stub; can be enhanced later
+  const selectedShapes = editor.getSelectedShapes().map((shape) => toSimpleShape(shape));
   return { bounds, blurryShapes, peripheralClusters, selectedShapes };
 }
 
-export async function getViewportScreenshot(editor: any): Promise<string | null> {
+export async function getViewportScreenshot(editor: Editor): Promise<string | null> {
   if (!editor) throw new Error("Editor not ready");
   const viewport = editor.getViewportPageBounds();
-  const shapes = editor.getCurrentPageShapesSorted().filter((s: any) => {
+  const shapes = editor.getCurrentPageShapesSorted().filter((s) => {
     const b = editor.getShapeMaskedPageBounds(s);
     return b && b.collides(viewport);
   });
@@ -45,7 +66,7 @@ export async function getViewportScreenshot(editor: any): Promise<string | null>
   return await toDataUrl();
 }
 
-function toSimpleShape(shape: any) {
+function toSimpleShape(shape: EditorShape) {
   try {
     const rawId = String(shape?.id ?? "");
     const shapeId = rawId.replace(/^shape:/, "");
@@ -62,7 +83,7 @@ function toSimpleShape(shape: any) {
   }
 }
 
-function toBlurryShapeSummary(shape: any) {
+function toBlurryShapeSummary(shape: EditorShape) {
   try {
     const simple = toSimpleShape(shape);
     if (!simple) return null;
