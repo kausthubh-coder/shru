@@ -128,29 +128,6 @@ export const updateLesson = mutation({
   },
 });
 
-export const listVersions = query({
-  args: { spaceId: v.id("sessions") },
-  returns: v.array(
-    v.object({
-      _id: v.id("sessions"),
-      createdAt: v.number(),
-      createdBy: v.string(),
-      content: v.any(),
-    }),
-  ),
-  handler: async () => {
-    return [];
-  },
-});
-
-export const saveVersion = mutation({
-  args: { spaceId: v.id("sessions") },
-  returns: v.null(),
-  handler: async () => {
-    return null;
-  },
-});
-
 type AnyCtx = QueryCtx | MutationCtx;
 
 async function assertSessionOwnership(ctx: AnyCtx, sessionId: Id<"sessions">) {

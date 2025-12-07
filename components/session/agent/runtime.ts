@@ -1,4 +1,4 @@
-import { AgentRuntime } from "@/types/toolContracts";
+import { AgentRuntime, WhiteboardShape } from "@/types/toolContracts";
 
 type BuildRuntimeParams = {
   sessionRef: React.MutableRefObject<unknown>;
@@ -13,8 +13,8 @@ type BuildRuntimeParams = {
   runActiveFile: () => Promise<{ stdout: string; stderr: string; info: string[] }>;
   getScreenshot: () => Promise<string | null>;
   getViewContext: () => unknown;
-  dispatchAction: (action: unknown) => Promise<void>;
-  getSimpleShape: (shapeId: string) => unknown | null;
+  dispatchAction: (action: Record<string, unknown>) => Promise<void>;
+  getSimpleShape: (shapeId: string) => WhiteboardShape | null;
   getVisibleTextItems: () => Array<{ shapeId: string; type: string; text: string; note?: string }>;
   notesGetText: () => string;
   notesSetText: (text: string) => void;
@@ -45,7 +45,7 @@ export function buildRuntime(params: BuildRuntimeParams): AgentRuntime {
 
   return {
     whiteboard: {
-      dispatchAction: async (action: unknown) => { await dispatchAction(action); },
+      dispatchAction: async (action: Record<string, unknown>) => { await dispatchAction(action); },
       getViewContext: () => getViewContext(),
       getScreenshot: async () => await getScreenshot(),
       getSimpleShape: (shapeId: string) => getSimpleShape(shapeId),

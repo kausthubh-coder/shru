@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import { Tldraw } from "tldraw";
 import { toRichText } from "@tldraw/tlschema";
 import "tldraw/tldraw.css";
@@ -19,7 +20,7 @@ import {
 import { sendAutoContext as sendAutoContextService } from "./services/autoContext";
 import { sendAutoContext as sendAutoContextCombined } from "./services/context";
 import { buildAllTools } from "./agent/registry";
-import { AgentRuntime } from "@/types/toolContracts";
+import { AgentRuntime, ToolEventRecord } from "@/types/toolContracts";
 import { createRealtimeSessionHandle } from "./agent/session";
 import { buildRuntime } from "./agent/runtime";
 import { NotesEditor } from "@/components/lesson/NotesEditor";
@@ -29,6 +30,82 @@ import {
   NotesDocT,
   parseNotesYaml,
 } from "@/types/notesYaml";
+
+type TldrawEditor = {
+  createShape: (shape: unknown) => void;
+  deleteShape?: (shapeId: string) => void;
+  deleteShapes?: (shapeIds: string[]) => void;
+  updateShapes?: (shapes: Array<Record<string, unknown>>) => void;
+  loadSnapshot?: (snapshot: unknown) => void;
+  getSnapshot?: () => unknown;
+  getViewportPageBounds?: () => { collides: (bounds: unknown) => boolean } | null;
+  getCurrentPageShapesSorted?: () => Array<unknown>;
+  getShapeMaskedPageBounds?: (shape: unknown) => { collides: (bounds: unknown) => boolean } | null;
+  getShape?: (id: string) => unknown;
+  getCurrentPageShapeIds?: () => string[];
+  zoomToBounds?: (bounds: { x?: number; y?: number; w?: number; h?: number }) => void;
+  store?: {
+    loadSnapshot?: (snapshot: unknown) => void;
+    getSnapshot?: () => unknown;
+    listen?: (fn: () => void, opts?: { scope?: string; source?: string }) => () => void;
+  };
+};
+
+type AgentHandle = {
+  act: (action: Record<string, unknown>) => { diff: unknown; promise: Promise<unknown> };
+};
+
+type SimpleShape = {
+  shapeId: string;
+  type: string;
+  text: string;
+  note?: string;
+};
+
+type SimpleGeoShape = {
+  _type?: string;
+  shapeId?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  text?: string;
+  geo?: string;
+};
+
+type RealtimeTransportLike = {
+  sendEvent?: (evt: unknown) => void;
+  on?: (event: string, handler: (evt: unknown) => void) => unknown;
+  close?: () => void;
+};
+
+type RealtimeSessionLike = {
+  transport?: RealtimeTransportLike;
+  on?: (event: string, handler: (evt: unknown) => void) => void;
+};
+
+type ViewContextEditor = Parameters<typeof computeViewContext>[0];
+
+type TurnLog = {
+  id: string;
+  startedAt: number;
+  userTranscript: string;
+  assistantTranscript: string;
+  tools: Array<ToolEventRecord>;
+  contextChars: number;
+  imageLen: number;
+  endedAt?: number;
+};
+
+const toErrorMessage = (err: unknown): string => {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+};
 
 const DEFAULT_IDE_FILE = {
   name: "main.py",
@@ -57,12 +134,12 @@ export default function SessionWorkspace({
   sessionId: Id<"sessions">;
   enabledTools?: ("whiteboard" | "code" | "notes")[];
 }) {
-  const editorRef = useRef<unknown>(null);
-  const agentRef = useRef<unknown>(null);
+  const editorRef = useRef<TldrawEditor | null>(null);
+  const agentRef = useRef<AgentHandle | null>(null);
   const [editorReady, setEditorReady] = useState(false);
 
   // Voice agent/session state
-  const sessionRef = useRef<ReturnType<typeof createRealtimeSessionHandle> | null>(null);
+  const sessionRef = useRef<RealtimeSessionLike | null>(null);
   const sessionHandleRef = useRef<ReturnType<typeof createRealtimeSessionHandle> | null>(null);
   const [agentStatus, setAgentStatus] = useState<"disconnected"|"connecting"|"connected">("disconnected");
   const [toolBusy, setToolBusy] = useState(false);
@@ -81,9 +158,8 @@ export default function SessionWorkspace({
   const [muted, setMuted] = useState(false);
   const waitingResponseRef = useRef<boolean>(false);
   const sessionReadyRef = useRef<boolean>(false);
-  const currentTurnRef = useRef<unknown | null>(null);
-  const lastLangAssertRef = useRef<number>(0);
-  const sessionTurnsRef = useRef<Array<unknown>>([]);
+  const currentTurnRef = useRef<TurnLog | null>(null);
+  const sessionTurnsRef = useRef<Array<TurnLog>>([]);
   const [inputDevices, setInputDevices] = useState<Array<MediaDeviceInfo>>([]);
   const [outputDevices, setOutputDevices] = useState<Array<MediaDeviceInfo>>([]);
   const [selectedInputId, setSelectedInputId] = useState<string>("");
@@ -295,15 +371,13 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
                   schemaVersion: whiteboardSchemaVersion,
                 });
                 lastSyncedWhiteboardHash.current = hash;
-              } catch (err: any) {
-                appendLog(`whiteboard save error: ${String(err?.message ?? err)}`);
+              } catch (err: unknown) {
+                appendLog(`whiteboard save error: ${toErrorMessage(err)}`);
               }
             }, 800);
           }
-        } catch (err: any) {
-          appendLog(
-            `whiteboard snapshot error: ${String(err?.message ?? err)}`,
-          );
+        } catch (err: unknown) {
+          appendLog(`whiteboard snapshot error: ${toErrorMessage(err)}`);
         }
       },
       { scope: "document", source: "user" },
@@ -367,16 +441,22 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
 
   const playTestTone = useCallback(async () => {
     try {
-      const AudioContextCtor: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
+      if (!AudioContextCtor) return;
       const ctx = new AudioContextCtor();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'sine';
+      osc.type = "sine";
       osc.frequency.value = 440;
       gain.gain.value = 0.1;
       osc.connect(gain).connect(ctx.destination);
       osc.start();
-      setTimeout(() => { try { osc.stop(); ctx.close(); } catch {} }, 600);
+      setTimeout(() => {
+        try {
+          osc.stop();
+          ctx.close();
+        } catch {}
+      }, 600);
     } catch {}
   }, []);
 
@@ -424,8 +504,8 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
       pyodide.setStderr({ batched: (s: string) => pushOut('stderr', s) });
       await pyodide.runPythonAsync(activeFile.content);
       setIdeOutputs((prev) => [...out, ...prev].slice(0, 500));
-    } catch (err: any) {
-      setIdeOutputs((prev) => [{ type: 'stderr', text: String(err?.message ?? err), ts: Date.now() }, ...prev]);
+    } catch (err: unknown) {
+      setIdeOutputs((prev) => [{ type: 'stderr', text: toErrorMessage(err), ts: Date.now() }, ...prev]);
     } finally {
       setIdeRunning(false);
     }
@@ -457,8 +537,8 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
       setIdeOutputs((prev) => [...out, ...prev].slice(0, 500));
       
       return { stdout, stderr, info };
-    } catch (err: any) {
-      const errorMsg = String(err?.message ?? err);
+    } catch (err: unknown) {
+      const errorMsg = toErrorMessage(err);
       setIdeOutputs((prev) => [{ type: 'stderr', text: errorMsg, ts: Date.now() }, ...prev]);
       return { stdout: '', stderr: errorMsg, info: [] };
     } finally {
@@ -468,29 +548,32 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
 
   const clearConsole = useCallback(() => setIdeOutputs([]), []);
 
-  const dispatchAction = useCallback(async (action: any) => {
+  const dispatchAction = useCallback(async (action: Record<string, unknown>) => {
     const agent = agentRef.current;
     if (!agent) throw new Error("Agent not ready");
     const rid = Math.random().toString(36).slice(2, 8);
     const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    const safeJson = (v: any, limit = 400) => {
+    const safeJson = (v: unknown, limit = 400) => {
       try { const s = JSON.stringify(v); return s.length > limit ? s.slice(0, limit) + '…' : s; } catch { return '[unserializable]'; }
     };
-    const summarizeDiff = (diff: any) => {
+    const summarizeDiff = (diff: unknown) => {
       try {
         let aS = 0, aO = 0, uS = 0, uO = 0, rS = 0, rO = 0;
-        for (const k in (diff?.added ?? {})) {
-          const rec = (diff.added as any)[k];
+        const delta = diff as {
+          added?: Record<string, { typeName?: string }>;
+          updated?: Record<string, [unknown, { typeName?: string }?]>;
+          removed?: Record<string, { typeName?: string }>;
+        };
+        Object.values(delta?.added ?? {}).forEach((rec) => {
           if (rec?.typeName === 'shape') aS++; else aO++;
-        }
-        for (const k in (diff?.updated ?? {})) {
-          const recAfter = (diff.updated as any)[k]?.[1];
-          if (recAfter?.typeName === 'shape') uS++; else uO++;
-        }
-        for (const k in (diff?.removed ?? {})) {
-          const rec = (diff.removed as any)[k];
+        });
+        Object.values(delta?.updated ?? {}).forEach((pair) => {
+          const recAfter = Array.isArray(pair) ? pair[1] : undefined;
+          if ((recAfter as { typeName?: string } | undefined)?.typeName === 'shape') uS++; else uO++;
+        });
+        Object.values(delta?.removed ?? {}).forEach((rec) => {
           if (rec?.typeName === 'shape') rS++; else rO++;
-        }
+        });
         return `diff: +${aS}/${aO} ~${uS}/${uO} -${rS}/${rO}`;
       } catch {
         return 'diff: n/a';
@@ -510,9 +593,9 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       appendLog(`[act:done] rid=${rid} ${Math.round(t1 - t0)}ms ${summarizeDiff(diff)}`);
       try { console.log('[act:done]', { rid, ms: Math.round(t1 - t0), diff }); } catch {}
-    } catch (e: any) {
+    } catch (e: unknown) {
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      appendLog(`[act:error] rid=${rid} ${Math.round(t1 - t0)}ms ${String(e?.message ?? e)}`);
+      appendLog(`[act:error] rid=${rid} ${Math.round(t1 - t0)}ms ${toErrorMessage(e)}`);
       try { console.error('[act:error]', { rid, error: e }); } catch {}
       throw e;
     } finally {
@@ -521,42 +604,12 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
   }, [appendLog]);
 
   const getViewContext = useCallback(() => {
-    return computeViewContext(editorRef.current, agentRef.current);
-  }, []);
+    return computeViewContext(editorRef.current as unknown as ViewContextEditor, agentRef.current);
+  }, [agentRef]);
 
   const getScreenshot = useCallback(async () => {
-    return await getViewportScreenshot(editorRef.current);
+    return await getViewportScreenshot(editorRef.current as unknown as ViewContextEditor);
   }, []);
-
-  const flushWhiteboardSave = useCallback(async () => {
-    if (!hasWhiteboard || !whiteboardHydrated) return;
-    if (!pendingWhiteboardSnapshotRef.current) return;
-    const snapshot = pendingWhiteboardSnapshotRef.current;
-    pendingWhiteboardSnapshotRef.current = null;
-    if (whiteboardSaveTimeoutRef.current) {
-      clearTimeout(whiteboardSaveTimeoutRef.current);
-      whiteboardSaveTimeoutRef.current = null;
-    }
-    const hash = snapshotHash(snapshot);
-    if (!hash || hash === lastSyncedWhiteboardHash.current) return;
-    try {
-      await updateWhiteboardMutation({
-        sessionId,
-        snapshot,
-        schemaVersion: whiteboardSchemaVersion,
-      });
-      lastSyncedWhiteboardHash.current = hash;
-    } catch (err: any) {
-      appendLog(`whiteboard save error: ${String(err?.message ?? err)}`);
-    }
-  }, [
-    hasWhiteboard,
-    whiteboardHydrated,
-    updateWhiteboardMutation,
-    sessionId,
-    whiteboardSchemaVersion,
-    appendLog,
-  ]);
 
   const fetchEphemeralToken = useCallback(async () => {
     if (tokenPromiseRef.current) return await tokenPromiseRef.current;
@@ -578,11 +631,6 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
       tokenPromiseRef.current = null;
     }
   }, []);
-
-  // Configure the realtime session (declared after helpers to avoid TDZ)
-  let configureSession = (async () => {}) as unknown as () => Promise<void>;
-
-  // buildTutorInstructions is imported from lib/realtimeInstructions
 
   // Send compact auto-context (viewport + shapes + image)
   const sendAutoContext = useCallback(async (triggerResponse: boolean = false) => {
@@ -613,8 +661,8 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
     return res;
   }, [appendLog, getActiveFileSnapshot, notesYaml]);
 
-  // Now that helpers exist, define configureSession
-  configureSession = useCallback(async () => {
+  // Configure the realtime session (declared after helpers to avoid TDZ)
+  const configureSession = useCallback(async () => {
     const session = sessionRef.current;
     if (!session) return;
     try {
@@ -635,38 +683,14 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
           },
           instructions: buildPersonaInstructions('default'),
         },
-      } as any);
+      });
       try { await sendAutoContext(false); } catch {}
-    } catch (e: any) {
-      appendLog(`session.update error: ${String(e?.message ?? e)}`);
+    } catch (e: unknown) {
+      appendLog(`session.update error: ${toErrorMessage(e)}`);
     }
   }, [appendLog, sendAutoContext]);
 
   // Removed floating Python windows in favor of full-page IDE
-
-  // Whiteboard helpers (simple structured ops)
-  const addBox = useCallback((x: number, y: number) => {
-    try {
-      editorRef.current?.createShape({ type: "geo", x, y } as any);
-      appendLog(`create_box at (${x}, ${y})`);
-    } catch (e) {
-      appendLog(`create_box error: ${String((e as any)?.message ?? e)}`);
-    }
-  }, [appendLog]);
-
-  const addText = useCallback((x: number, y: number, text: string) => {
-    try {
-      editorRef.current?.createShape({
-        type: "geo",
-        x,
-        y,
-        props: { w: 240, h: 80, geo: "rectangle", richText: toRichText(String(text ?? "")) },
-      } as any);
-      appendLog(`add_text "${text}" as geo at (${x}, ${y})`);
-    } catch (e) {
-      appendLog(`add_text error: ${String((e as any)?.message ?? e)}`);
-    }
-  }, [appendLog]);
 
   // Voice agent start/stop with tools
   const startAgent = useCallback(async () => {
@@ -676,15 +700,14 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
     try {
       const token = await fetchEphemeralToken();
       const mod = await import("@openai/agents/realtime");
-      const { tool } = mod as any;
 
       // Create runtime bridges used by modular tools
       const runtime: AgentRuntime = buildRuntime({
-        editorRef,
         sessionRef,
         appendLog,
-        onToolEvent: (e) => {
-          try { setToolEvents((prev: Array<ToolEvent>) => [e as any, ...prev].slice(0, 100)); } catch {}
+        onToolEvent: (evt: unknown) => {
+          const e = evt as ToolEventRecord;
+          try { setToolEvents((prev: Array<ToolEventRecord>) => [e, ...prev].slice(0, 100)); } catch {}
           try {
             if (currentTurnRef.current) {
               currentTurnRef.current.tools = currentTurnRef.current.tools || [];
@@ -707,46 +730,53 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
         runActiveFile: () => runActiveFileCollect(),
         getScreenshot: async () => await getScreenshot(),
         getViewContext: () => getViewContext(),
-        dispatchAction: async (action: any) => { await dispatchAction(action); },
+        dispatchAction: async (action) => { await dispatchAction(action as Record<string, unknown>); },
         getSimpleShape: (shapeId: string) => {
           try {
             const editor = editorRef.current;
-            if (!editor) return null;
+            if (!editor || typeof editor.getShape !== "function") return null;
             const shape = editor.getShape(`shape:${shapeId}`);
             if (!shape) return null;
-            const rawId = String(shape?.id ?? "");
+            const shapeObj = shape as Record<string, unknown>;
+            const rawId = String(shapeObj?.id ?? "");
             const simpleId = rawId.replace(/^shape:/, "");
-            const type = String(shape?.type ?? "unknown");
-            const x = typeof (shape as any)?.x === 'number' ? (shape as any).x : 0;
-            const y = typeof (shape as any)?.y === 'number' ? (shape as any).y : 0;
-            const w = typeof (shape as any)?.props?.w === 'number' ? (shape as any).props.w : (typeof (shape as any)?.w === 'number' ? (shape as any).w : 0);
-            const h = typeof (shape as any)?.props?.h === 'number' ? (shape as any).props.h : (typeof (shape as any)?.h === 'number' ? (shape as any).h : 0);
-            const text = typeof (shape as any)?.props?.label === 'string' ? (shape as any).props.label : '';
-            const geo = typeof (shape as any)?.props?.geo === 'string' ? (shape as any).props.geo : undefined;
-            return { _type: type, shapeId: simpleId, x, y, w, h, text, geo } as any;
+            const type = String(shapeObj?.type ?? "unknown");
+            const props = (shapeObj?.props as Record<string, unknown> | undefined) ?? {};
+            const x = typeof shapeObj?.x === 'number' ? shapeObj.x : 0;
+            const y = typeof shapeObj?.y === 'number' ? shapeObj.y : 0;
+            const w = typeof props.w === 'number' ? props.w : (typeof (shapeObj as Record<string, unknown>)?.w === 'number' ? (shapeObj as Record<string, unknown>)?.w : 0);
+            const h = typeof props.h === 'number' ? props.h : (typeof (shapeObj as Record<string, unknown>)?.h === 'number' ? (shapeObj as Record<string, unknown>)?.h : 0);
+            const text = typeof props.label === 'string' ? props.label : '';
+            const geo = typeof props.geo === 'string' ? props.geo : undefined;
+            return { _type: type, shapeId: simpleId, x, y, w, h, text, geo } as SimpleGeoShape;
           } catch { return null; }
         },
         getVisibleTextItems: () => {
           try {
             const editor = editorRef.current;
-            if (!editor) return [] as any[];
+            if (!editor || typeof editor.getCurrentPageShapesSorted !== "function" || typeof editor.getViewportPageBounds !== "function") return [] as SimpleShape[];
             const viewport = editor.getViewportPageBounds();
-            const shapes = editor.getCurrentPageShapesSorted().filter((s: any) => {
-              const b = editor.getShapeMaskedPageBounds(s);
-              return b && b.collides(viewport);
-            });
-            const items = shapes.map((s: any) => {
+            const shapes = editor.getCurrentPageShapesSorted()
+              ?.filter((shape) => {
+                const bounds = editor.getShapeMaskedPageBounds?.(shape);
+                return Boolean(bounds && typeof bounds.collides === 'function' && bounds.collides(viewport));
+              }) ?? [];
+            const items = shapes.map((shape) => {
               try {
-                const rawId = String(s?.id ?? "");
+                const shapeObj = shape as Record<string, unknown>;
+                const rawId = String(shapeObj?.id ?? "");
                 const shapeId = rawId.replace(/^shape:/, "");
-                const type = String(s?.type ?? "unknown");
-                const text = typeof (s as any)?.props?.label === 'string' ? (s as any).props.label : '';
-                const note = typeof (s as any)?.props?.note === 'string' ? (s as any).props.note : '';
+                const type = String(shapeObj?.type ?? "unknown");
+                const props = (shapeObj?.props as Record<string, unknown> | undefined) ?? {};
+                const text = typeof props.label === 'string' ? props.label : '';
+                const note = typeof props.note === 'string' ? props.note : '';
                 return { shapeId, type, text, note };
-              } catch { return { shapeId: '', type: 'unknown', text: '', note: '' }; }
-            }).filter((i: any) => (i.text && i.text.length) || (i.note && i.note.length));
+              } catch {
+                return { shapeId: '', type: 'unknown', text: '', note: '' };
+              }
+            }).filter((i) => (i.text && i.text.length) || (i.note && i.note.length));
             return items;
-          } catch { return [] as any[]; }
+          } catch { return [] as SimpleShape[]; }
         },
         notesGetText: () => notesYaml,
         notesSetText: (text: string) => { setNotesYaml(String(text ?? "")); },
@@ -754,25 +784,29 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
           try {
             const parsed = parseNotesYaml(notesYaml);
             if (!parsed.doc) return;
-            const next = { ...parsed.doc, blocks: [...parsed.doc.blocks, { type: 'text', md: String(text ?? '') } as any] } as NotesDocT;
+            const next = { ...parsed.doc, blocks: [...parsed.doc.blocks, { type: 'text', md: String(text ?? '') }] } as NotesDocT;
             setNotesYaml(serializeNotesYaml(next));
           } catch {}
         },
       });
 
-      const tools = buildAllTools((def: any) => (mod as any).tool(def), runtime);
+      const tools = buildAllTools(
+        (def) => (mod as { tool: (definition: unknown) => unknown }).tool(def),
+        runtime,
+      );
 
       // Connect session via handle
       const handle = createRealtimeSessionHandle();
       sessionHandleRef.current = handle;
       await handle.connect({ token, selectedInputDeviceId: selectedInputId || undefined, selectedOutputDeviceId: selectedOutputId || undefined, audioElement: audioRef.current, appendLog, tools, agentName: "Studi" });
-      sessionRef.current = handle.getSession();
+      sessionRef.current = handle.getSession() as RealtimeSessionLike | null;
       mediaStreamRef.current = handle.getMediaStream();
 
       // Setup local mic level meter
       const setupAnalyser = (ms: MediaStream) => {
         try {
-          const AudioContextCtor: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+          const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
+          if (!AudioContextCtor) throw new Error("AudioContext not supported");
           const ctx = new AudioContextCtor();
           // Some browsers start suspended until a user gesture
           ctx.resume?.().catch(() => {});
@@ -828,20 +862,20 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
           };
           loop();
         } catch (e) {
-          appendLog(`analyser error: ${String((e as any)?.message ?? e)}`);
+          appendLog(`analyser error: ${toErrorMessage(e)}`);
         }
       };
       if (mediaStreamRef.current) setupAnalyser(mediaStreamRef.current);
       setAgentStatus("connected");
       appendLog("Agent connected");
       // Configure session with tutor instructions and send initial auto-context
-      try { await configureSession(); } catch (e) { appendLog(`configureSession error: ${String((e as any)?.message ?? e)}`); }
+      try { await configureSession(); } catch (e) { appendLog(`configureSession error: ${toErrorMessage(e)}`); }
       try {
         if (audioRef.current) {
           audioRef.current.muted = false;
           try {
-            if (selectedOutputId && (audioRef.current as any).setSinkId) {
-              await (audioRef.current as any).setSinkId(selectedOutputId);
+            if (selectedOutputId && audioRef.current.setSinkId) {
+              await audioRef.current.setSinkId(selectedOutputId);
               appendLog(`audio sink set to ${selectedOutputId}`);
             }
           } catch {}
@@ -849,20 +883,26 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
           // Setup output analyser from audio element
           const setupOutput = async () => {
             try {
-              const ctx = audioCtxRef.current ?? new (window as any).AudioContext();
+              const audioElLocal = audioRef.current;
+              if (!audioElLocal) return;
+              const ctx = audioCtxRef.current ?? (() => {
+                const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
+                if (!AudioContextCtor) throw new Error("AudioContext not supported");
+                return new AudioContextCtor();
+              })();
               audioCtxRef.current = ctx;
               await ctx.resume?.();
               const analyser = ctx.createAnalyser();
               analyser.fftSize = 1024;
-              let source: any = null;
+              let source: MediaStreamAudioSourceNode | MediaElementAudioSourceNode | null = null;
               try {
-                const stream = (audioRef.current as any).captureStream?.();
+                const stream = audioElLocal.captureStream?.() ?? audioElLocal.mozCaptureStream?.();
                 if (stream) {
                   source = ctx.createMediaStreamSource(stream);
                 }
               } catch {}
               if (!source) {
-                try { source = ctx.createMediaElementSource(audioRef.current); } catch {}
+                try { source = ctx.createMediaElementSource(audioElLocal); } catch {}
               }
               if (source) {
                 try { source.connect(analyser); } catch {}
@@ -885,7 +925,7 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
                 loop();
               }
             } catch (e) {
-              appendLog(`output analyser error: ${String((e as any)?.message ?? e)}`);
+              appendLog(`output analyser error: ${toErrorMessage(e)}`);
             }
           };
           setupOutput();
@@ -893,14 +933,15 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
       } catch {}
 
       // Optional history updates
-      sessionRef.current?.on?.("history_updated", (history: any) => {
+      sessionRef.current?.on?.("history_updated", (history: unknown) => {
         try {
           // Best-effort: find last user message with text content
           const items = Array.isArray(history) ? history : [];
           for (let i = items.length - 1; i >= 0; i--) {
-            const it = items[i];
-            if (it && it.type === 'message' && it.role === 'user' && Array.isArray(it.content)) {
-              const textPart = it.content.find((c: any) => c?.type === 'input_text' && typeof c?.text === 'string');
+            const it = items[i] as { type?: string; role?: string; content?: unknown };
+            const content = Array.isArray(it?.content) ? it.content : [];
+            if (it && it.type === 'message' && it.role === 'user' && Array.isArray(content)) {
+              const textPart = content.find((c) => c && typeof c === 'object' && (c as { type?: string }).type === 'input_text' && typeof (c as { text?: unknown }).text === 'string') as { text?: string } | undefined;
               if (textPart && typeof textPart.text === 'string') {
                 if (currentTurnRef.current) {
                   currentTurnRef.current.userTranscript = textPart.text;
@@ -916,13 +957,15 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
 
       // Transport event logging and speaking indicators
       try {
-        const off = sessionRef.current?.transport?.on?.("*", (evt: any) => {
-          if (!evt || !evt.type) return;
-          appendLog(`[evt] ${evt.type}`);
+        const off = sessionRef.current?.transport?.on?.("*", (evt: unknown) => {
+          const eventObj = evt as { type?: string; delta?: unknown; code?: unknown; message?: unknown };
+          if (!eventObj || !eventObj.type) return;
+          appendLog(`[evt] ${eventObj.type}`);
           // Minimal transcript/text previews for debugging
           try {
-            if (evt.type === 'response.output_audio_transcript.delta') {
-              const d = String((evt as any)?.delta ?? '');
+            if (eventObj.type === 'response.output_audio_transcript.delta') {
+              const dRaw = eventObj.delta;
+              const d = typeof dRaw === 'string' ? dRaw : dRaw !== undefined ? String(dRaw) : '';
               if (d) {
                 appendLog(`[transcript.delta] ${d.slice(0,160)}${d.length>160?'…':''}`);
                 if (languageLock) maybeReassertLanguage(d);
@@ -933,18 +976,19 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
                 } catch {}
               }
             }
-            if (evt.type === 'response.output_text.delta') {
-              const d = String((evt as any)?.delta ?? '');
+            if (eventObj.type === 'response.output_text.delta') {
+              const dRaw = eventObj.delta;
+              const d = typeof dRaw === 'string' ? dRaw : dRaw !== undefined ? String(dRaw) : '';
               if (d) appendLog(`[text.delta] ${d.slice(0,160)}${d.length>160?'…':''}`);
             }
-            if (evt.type === 'invalid_request_error' || evt.type === 'error') {
-              const code = (evt as any)?.code ?? 'n/a';
-              const msg = (evt as any)?.message ?? 'n/a';
-              appendLog(`[server-error] code=${code} msg=${msg}`);
+            if (eventObj.type === 'invalid_request_error' || eventObj.type === 'error') {
+              const code = eventObj.code ?? 'n/a';
+              const msg = eventObj.message ?? 'n/a';
+              appendLog(`[server-error] code=${String(code)} msg=${String(msg)}`);
             }
           } catch {}
-          if (evt.type === "input_audio_buffer.speech_started") setUserSpeaking(true);
-          if (evt.type === "input_audio_buffer.speech_stopped") {
+          if (eventObj.type === "input_audio_buffer.speech_started") setUserSpeaking(true);
+          if (eventObj.type === "input_audio_buffer.speech_stopped") {
             setUserSpeaking(false);
             if (!waitingResponseRef.current) {
               waitingResponseRef.current = true;
@@ -961,8 +1005,8 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
               } catch {}
             }
           }
-          if (evt.type === "response.output_audio.delta") setAgentSpeaking(true);
-          if (evt.type === "response.output_audio.done" || evt.type === "response.done") {
+          if (eventObj.type === "response.output_audio.delta") setAgentSpeaking(true);
+          if (eventObj.type === "response.output_audio.done" || eventObj.type === "response.done") {
             setAgentSpeaking(false);
             waitingResponseRef.current = false;
             try {
@@ -977,18 +1021,40 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
               }
             } catch {}
           }
-          if (evt.type === "session.updated") {
+          if (eventObj.type === "session.updated") {
             // Set readiness only after server ack of session.update
             sessionReadyRef.current = true;
           }
         });
-        unsubTransportRef.current = typeof off === "function" ? off : null;
+        const unsubscribe = typeof off === "function" ? (off as () => void) : null;
+        unsubTransportRef.current = unsubscribe;
       } catch {}
-    } catch (e: any) {
+    } catch (e: unknown) {
       setAgentStatus("disconnected");
-      appendLog(`Agent error: ${String(e?.message ?? e)}`);
+      appendLog(`Agent error: ${toErrorMessage(e)}`);
     }
-  }, [agentStatus, fetchEphemeralToken, appendLog, addBox, addText, muted]);
+  }, [
+    activeFile,
+    agentStatus,
+    appendLog,
+    configureSession,
+    createFile,
+    dispatchAction,
+    fetchEphemeralToken,
+    files,
+    getActiveFileSnapshot,
+    getScreenshot,
+    getViewContext,
+    languageLock,
+    maybeReassertLanguage,
+    notesYaml,
+    randomId,
+    runActiveFileCollect,
+    selectedInputId,
+    selectedOutputId,
+    sendAutoContext,
+    updateActiveFileContent,
+  ]);
 
   const stopAgent = useCallback(async () => {
     if (agentStatus !== "connected") return;
@@ -1011,13 +1077,13 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
     // Pause audio output
     try {
       if (audioRef.current) {
-        try { (audioRef.current as any).srcObject = null; } catch {}
+        try { audioRef.current.srcObject = null; } catch {}
         await audioRef.current.pause?.();
         audioRef.current.muted = true;
       }
     } catch {}
     // Close transport if available
-    try { (sessionRef.current as any)?.transport?.close?.(); } catch {}
+    try { sessionRef.current?.transport?.close?.(); } catch {}
     if (unsubTransportRef.current) {
       try { unsubTransportRef.current(); } catch {}
       unsubTransportRef.current = null;
@@ -1048,7 +1114,7 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
               output: { format: { type: 'audio/pcm' }, voice: 'marin' },
             },
           },
-        } as any);
+        });
       }
     } catch {}
   }, [appendLog]);
@@ -1090,8 +1156,8 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
           activeFile: payload.activeFile,
         });
         ideLastServerHash.current = hash;
-      } catch (err: any) {
-        appendLog(`ide save error: ${String(err?.message ?? err)}`);
+      } catch (err: unknown) {
+        appendLog(`ide save error: ${toErrorMessage(err)}`);
       }
     }, 800);
   }, [
@@ -1116,8 +1182,8 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
       try {
         await updateLessonMutation({ sessionId, yaml: notesYaml });
         notesLastServerHash.current = hash;
-      } catch (err: any) {
-        appendLog(`lesson save error: ${String(err?.message ?? err)}`);
+      } catch (err: unknown) {
+        appendLog(`lesson save error: ${toErrorMessage(err)}`);
       }
     }, 800);
   }, [
@@ -1169,59 +1235,68 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
             try {
               // Minimal shim for agentRef to satisfy dispatchAction calls
               agentRef.current = {
-                act: ({ _type, ...rest }: any) => {
+                act: ({ _type, ...rest }: Record<string, unknown>) => {
                   const editor = editorRef.current;
-                  const result = { diff: {}, promise: Promise.resolve() } as any;
+                  const result = { diff: {}, promise: Promise.resolve() };
                   try {
                     if (!editor) return result;
+                    const restObj = rest as {
+                      shape?: SimpleGeoShape;
+                      shapeId?: string;
+                      x?: number;
+                      y?: number;
+                      w?: number;
+                      h?: number;
+                      text?: string;
+                    };
                     if (_type === 'create') {
-                      const shapeType = rest.shape?._type;
-                      let shapePayload: any;
+                      const shapeType = restObj.shape?._type;
+                      let shapePayload: Record<string, unknown>;
                       
                       if (shapeType === 'text') {
                         // Create text shape with proper tldraw v4 props: use richText and w only
                         shapePayload = {
                           type: 'text',
-                          x: rest.shape?.x ?? 0,
-                          y: rest.shape?.y ?? 0,
+                          x: restObj.shape?.x ?? 0,
+                          y: restObj.shape?.y ?? 0,
                           props: {
-                            w: rest.shape?.w ?? 220,
-                            richText: toRichText(String(rest.shape?.text ?? '')),
+                            w: restObj.shape?.w ?? 220,
+                            richText: toRichText(String(restObj.shape?.text ?? '')),
                           }
                         };
                       } else {
                         // Create geo shape with allowed geo types
-                        const geoType = rest.shape?._type ?? 'rectangle';
+                        const geoType = restObj.shape?._type ?? 'rectangle';
                         const normalizedGeo = ['rectangle', 'ellipse', 'triangle', 'diamond', 'pentagon', 'hexagon', 'octagon', 'star', 'rhombus', 'rhombus-2', 'oval', 'trapezoid', 'arrow-right', 'arrow-left', 'arrow-up', 'arrow-down', 'x-box', 'check-box', 'heart', 'cloud'].includes(geoType) 
                           ? geoType 
                           : 'rectangle'; // fallback
                         
                         shapePayload = {
                           type: 'geo',
-                          x: rest.shape?.x ?? 0,
-                          y: rest.shape?.y ?? 0,
+                          x: restObj.shape?.x ?? 0,
+                          y: restObj.shape?.y ?? 0,
                           props: {
-                            w: rest.shape?.w ?? 100,
-                            h: rest.shape?.h ?? 80,
+                            w: restObj.shape?.w ?? 100,
+                            h: restObj.shape?.h ?? 80,
                             geo: normalizedGeo
                           }
                         };
                       }
                       
                       try { console.log('[tldraw:createShape]', shapePayload); } catch {}
-                      editor.createShape(shapePayload as any);
+                      editor.createShape(shapePayload);
                     } else if (_type === 'delete') {
-                      if (rest.shapeId) editor.deleteShape?.(`shape:${rest.shapeId}`);
+                      if (restObj.shapeId) editor.deleteShape?.(`shape:${restObj.shapeId}`);
                     } else if (_type === 'move') {
-                      if (rest.shapeId) editor.updateShapes?.([{ id: `shape:${rest.shapeId}`, type: 'geo', x: rest.x, y: rest.y }] as any);
+                      if (restObj.shapeId) editor.updateShapes?.([{ id: `shape:${restObj.shapeId}`, type: 'geo', x: restObj.x, y: restObj.y }]);
                     } else if (_type === 'label') {
                       // For v4.0.2, inline text on geo may be invalid; skip or switch to a dedicated text shape
-                      try { console.warn('[tldraw:label] geo text not supported, skipping label change', { shapeId: rest.shapeId, text: rest.text }); } catch {}
+                      try { console.warn('[tldraw:label] geo text not supported, skipping label change', { shapeId: restObj.shapeId, text: restObj.text }); } catch {}
                     } else if (_type === 'clear') {
                       const ids = editor.getCurrentPageShapeIds();
-                      editor.deleteShapes?.(ids as any);
+                      editor.deleteShapes?.(ids ?? []);
                     } else if (_type === 'setMyView') {
-                      editor.zoomToBounds?.({ x: rest.x, y: rest.y, w: rest.w, h: rest.h });
+                      editor.zoomToBounds?.({ x: restObj.x, y: restObj.y, w: restObj.w, h: restObj.h });
                     }
                   } catch {}
                   return { diff: {}, promise: Promise.resolve() };
@@ -1400,7 +1475,7 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
             pushToTalk={pushToTalk}
             setPushToTalk={(v: boolean) => setPushToTalk(v)}
             vadEagerness={vadEagerness}
-            setVadEagerness={(v: any) => applyVadEagerness(v)}
+            setVadEagerness={(v: 'low' | 'medium' | 'high') => applyVadEagerness(v)}
           />
         </div>
       </div>
@@ -1474,7 +1549,16 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
             <div>
               <div className="font-medium mb-1">viewport image</div>
               {debugContext?.imageUrl ? (
-                <img src={debugContext.imageUrl} alt="viewport" className="w-full border rounded bg-white" />
+                <div className="relative w-full aspect-video">
+                  <Image
+                    src={debugContext.imageUrl}
+                    alt="viewport"
+                    fill
+                    sizes="420px"
+                    unoptimized
+                    className="object-contain border rounded bg-white"
+                  />
+                </div>
               ) : (
                 <div className="text-gray-500">—</div>
               )}
@@ -1523,7 +1607,7 @@ function hashString(input: string | null | undefined): string | null {
   return hash.toString(36);
 }
 
-function snapshotHash(snapshot: any): string | null {
+function snapshotHash(snapshot: unknown): string | null {
   try {
     return hashString(JSON.stringify(snapshot ?? null));
   } catch {

@@ -36,9 +36,16 @@ export interface RealtimeSessionHandle {
 }
 
 type RealtimeModules = {
-  RealtimeAgent: unknown;
-  RealtimeSession: unknown;
-  OpenAIRealtimeWebRTC: unknown;
+  RealtimeAgent: new (args: Record<string, unknown>) => unknown;
+  RealtimeSession: new (
+    agent: unknown,
+    opts?: Record<string, unknown>,
+  ) => {
+    connect?: (opts: Record<string, unknown>) => Promise<void>;
+    transport?: { on?: (event: string, handler: (evt: unknown) => void) => unknown; close?: () => void };
+    disconnect?: () => Promise<void>;
+  };
+  OpenAIRealtimeWebRTC: new (args: { mediaStream: MediaStream; audioElement: HTMLAudioElement }) => unknown;
 };
 
 function isClient(): boolean {
@@ -47,8 +54,11 @@ function isClient(): boolean {
 
 export function createRealtimeSessionHandle(): RealtimeSessionHandle {
   let modules: RealtimeModules | null = null;
-  let session: unknown | null = null;
-  let transport: unknown | null = null;
+  type RealtimeTransport = { on?: (event: string, handler: (evt: unknown) => void) => unknown; sendEvent?: (evt: unknown) => void; close?: () => void };
+  type RealtimeSessionInstance = { connect?: (opts: Record<string, unknown>) => Promise<void>; disconnect?: () => Promise<void>; transport?: RealtimeTransport };
+
+  let session: RealtimeSessionInstance | null = null;
+  let transport: RealtimeTransport | null = null;
   let mediaStream: MediaStream | null = null;
   let audioEl: HTMLAudioElement | null = null;
   let onAnyHandler: ((evt: unknown) => void) | null = null;
@@ -62,9 +72,9 @@ export function createRealtimeSessionHandle(): RealtimeSessionHandle {
     if (!isClient()) throw new Error("Realtime modules must be loaded on client");
     const mod = await import("@openai/agents/realtime");
     modules = {
-      RealtimeAgent: (mod as Record<string, unknown>).RealtimeAgent,
-      RealtimeSession: (mod as Record<string, unknown>).RealtimeSession,
-      OpenAIRealtimeWebRTC: (mod as Record<string, unknown>).OpenAIRealtimeWebRTC,
+      RealtimeAgent: (mod as Record<string, unknown>).RealtimeAgent as RealtimeModules["RealtimeAgent"],
+      RealtimeSession: (mod as Record<string, unknown>).RealtimeSession as RealtimeModules["RealtimeSession"],
+      OpenAIRealtimeWebRTC: (mod as Record<string, unknown>).OpenAIRealtimeWebRTC as RealtimeModules["OpenAIRealtimeWebRTC"],
     };
     return modules;
   }
@@ -102,17 +112,18 @@ export function createRealtimeSessionHandle(): RealtimeSessionHandle {
     } catch {}
 
     // Transport
-    transport = new OpenAIRealtimeWebRTC({ mediaStream, audioElement: audioEl });
+    transport = new OpenAIRealtimeWebRTC({ mediaStream, audioElement: audioEl }) as RealtimeTransport;
 
     // Agent + Session
     const agent = new RealtimeAgent({ name: agentName ?? "Studi", instructions: "You are a helpful tutor.", tools: Array.isArray(tools) ? tools : undefined });
-    session = new RealtimeSession(agent, { model: "gpt-realtime", transport });
-    await session.connect({ apiKey: token });
+    const sessionInstance = new RealtimeSession(agent, { model: "gpt-realtime", transport });
+    session = sessionInstance;
+    await sessionInstance.connect?.({ apiKey: token });
     logFn("connected");
 
     // Wire wildcard events to external handler if provided later via onAll
     try {
-      const off = session.transport?.on?.("*", (evt: unknown) => {
+      const off = session?.transport?.on?.("*", (evt: unknown) => {
         if (onAnyHandler) {
           try { onAnyHandler(evt); } catch {}
         }
@@ -138,7 +149,7 @@ export function createRealtimeSessionHandle(): RealtimeSessionHandle {
     const create_response = params.createResponseFromVad ?? false;
     const interrupt_response = params.interruptResponseFromVad ?? false;
 
-    session.transport?.sendEvent?.({
+    session?.transport?.sendEvent?.({
       type: "session.update",
       session: {
         type: "realtime",
@@ -158,10 +169,7 @@ export function createRealtimeSessionHandle(): RealtimeSessionHandle {
 
   async function disconnect(): Promise<void> {
     try { await session?.disconnect?.(); } catch {}
-    try { 
-      const s = session as { transport?: { close?: () => void } };
-      s?.transport?.close?.(); 
-    } catch {}
+    try { session?.transport?.close?.(); } catch {}
     session = null;
     transport = null;
     // Stop mic tracks

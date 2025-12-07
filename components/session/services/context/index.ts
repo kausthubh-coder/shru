@@ -4,6 +4,10 @@ import {
   getViewportScreenshot,
 } from "@/lib/viewContext";
 
+type ViewContextEditor = Parameters<typeof getViewContext>[0];
+type TransportLike = { sendEvent?: (evt: unknown) => void };
+type SessionLike = { transport?: TransportLike };
+
 type DebugSetter = (v: { text?: string; imageUrl?: string | null; ts: number } | null) => void;
 
 type LastContext = { jsonHash: string; imageHash: string; ts: number };
@@ -28,12 +32,12 @@ export async function sendAutoContext(
   ideSnapshot?: { name: string; language: string; content: string } | null,
   notesYaml?: string,
 ): Promise<'ok' | 'no-session' | 'noop' | 'error'> {
-  const session = sessionRef.current;
+  const session = sessionRef.current as SessionLike | null;
   const transport = session?.transport;
-  if (!transport) return 'no-session';
+  if (!transport || typeof transport.sendEvent !== "function") return 'no-session';
 
   try {
-    const ctx = getViewContext(editorRef.current, agentRef.current);
+    const ctx = getViewContext(editorRef.current as ViewContextEditor, agentRef.current);
     const whiteboard = {
       bounds: ctx.bounds,
       blurryShapes: Array.isArray(ctx.blurryShapes) ? ctx.blurryShapes.slice(0, 60) : [],
@@ -49,7 +53,7 @@ export async function sendAutoContext(
     const text = JSON.stringify(workspace);
     const jsonHash = hashString(text);
 
-    const imageUrl = await getViewportScreenshot(editorRef.current);
+    const imageUrl = await getViewportScreenshot(editorRef.current as ViewContextEditor);
     const imageHash = imageUrl && imageUrl !== 'null' ? hashString(imageUrl.slice(0, 512)) : '';
 
     const key = session as object;

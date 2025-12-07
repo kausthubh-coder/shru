@@ -20,17 +20,35 @@ export type ToolEventRecord = {
   name: string;
   status: 'start' | 'done' | 'error';
   ms?: number;
-  args?: any;
-  result?: any;
+  args?: unknown;
+  result?: unknown;
   err?: string;
 };
 
+export type WhiteboardShape = {
+  shapeId?: string;
+  type?: string;
+  _type?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  text?: string;
+  note?: string;
+  geo?: string;
+};
+
 export interface WhiteboardRuntime {
-  dispatchAction: (action: any) => Promise<void>;
-  getViewContext: () => any;
+  dispatchAction: (action: Record<string, unknown>) => Promise<void>;
+  getViewContext: () => unknown;
   getScreenshot: () => Promise<string | null>;
-  getSimpleShape: (shapeId: string) => any | null;
-  getVisibleTextItems: () => Array<{ shapeId: string; type: string; text: string; note?: string }>;
+  getSimpleShape: (shapeId: string) => WhiteboardShape | null;
+  getVisibleTextItems: () => Array<{
+    shapeId: string;
+    type: string;
+    text: string;
+    note?: string;
+  }>;
 }
 
 export interface IdeRuntime {
@@ -52,18 +70,18 @@ export interface AgentRuntime {
   whiteboard: WhiteboardRuntime;
   ide: IdeRuntime;
   notes: NotesRuntime;
-  sendTransportEvent?: (evt: any) => void;
+  sendTransportEvent?: (evt: unknown) => void;
   appendLog?: (line: string) => void;
   onToolEvent?: (e: ToolEventRecord) => void;
   setToolBusy?: (busy: boolean) => void;
 }
 
-export type WrapExecuteFn = (
+export type WrapExecuteFn = <TArgs = unknown, TResult = unknown>(
   name: string,
-  fn: (args: any, details?: any) => Promise<any> | any,
-) => (args: any, details?: any) => Promise<any>;
+  fn: (args: TArgs, details?: unknown) => Promise<TResult> | TResult,
+) => (args: TArgs, details?: unknown) => Promise<TResult>;
 
-function safeJson(value: any, limit = 600): string {
+function safeJson(value: unknown, limit = 600): string {
   try {
     const s = JSON.stringify(value);
     return s.length > limit ? s.slice(0, limit) + '…' : s;
@@ -75,7 +93,10 @@ function safeJson(value: any, limit = 600): string {
 export function createWrapExecute(runtime: AgentRuntime): WrapExecuteFn {
   return (name, fn) => async (args, details) => {
     const rid = Math.random().toString(36).slice(2, 8);
-    const t0 = (typeof performance !== 'undefined' && (performance as any).now) ? (performance as any).now() : Date.now();
+    const t0 =
+      typeof performance !== 'undefined' && (performance as typeof performance & { now?: () => number }).now
+        ? performance.now()
+        : Date.now();
     try {
       runtime.appendLog?.(`[tool:start] ${name} rid=${rid} args=${safeJson(args)}`);
       // developer console visibility
@@ -85,7 +106,10 @@ export function createWrapExecute(runtime: AgentRuntime): WrapExecuteFn {
     try {
       runtime.setToolBusy?.(true);
       const res = await fn(args, details);
-      const t1 = (typeof performance !== 'undefined' && (performance as any).now) ? (performance as any).now() : Date.now();
+      const t1 =
+        typeof performance !== 'undefined' && (performance as typeof performance & { now?: () => number }).now
+          ? performance.now()
+          : Date.now();
       const ms = Math.round(t1 - t0);
       try {
         runtime.appendLog?.(`[tool:done] ${name} rid=${rid} ${ms}ms result=${typeof res === 'string' ? res : safeJson(res)}`);
@@ -93,15 +117,19 @@ export function createWrapExecute(runtime: AgentRuntime): WrapExecuteFn {
       } catch {}
       try { runtime.onToolEvent?.({ ts: Date.now(), rid, name, status: 'done', result: res, ms }); } catch {}
       return res;
-    } catch (e: any) {
-      const t1 = (typeof performance !== 'undefined' && (performance as any).now) ? (performance as any).now() : Date.now();
+    } catch (e: unknown) {
+      const t1 =
+        typeof performance !== 'undefined' && (performance as typeof performance & { now?: () => number }).now
+          ? performance.now()
+          : Date.now();
       const ms = Math.round(t1 - t0);
-      const stack = e?.stack ? String(e.stack).slice(0, 600) : '';
+      const stack = e && typeof e === 'object' && 'stack' in e ? String((e as { stack?: unknown }).stack).slice(0, 600) : '';
+      const message = e && typeof e === 'object' && 'message' in e ? String((e as { message?: unknown }).message) : String(e);
       try {
-        runtime.appendLog?.(`[tool:error] ${name} rid=${rid} ${ms}ms err=${String(e?.message ?? e)}${stack ? ` stack=${stack}` : ''}`);
+        runtime.appendLog?.(`[tool:error] ${name} rid=${rid} ${ms}ms err=${message}${stack ? ` stack=${stack}` : ''}`);
         console.error(`[tool:error] ${name} rid=${rid} ${ms}ms`, e);
       } catch {}
-      try { runtime.onToolEvent?.({ ts: Date.now(), rid, name, status: 'error', err: String(e?.message ?? e), ms }); } catch {}
+      try { runtime.onToolEvent?.({ ts: Date.now(), rid, name, status: 'error', err: message, ms }); } catch {}
       throw e;
     } finally {
       try { runtime.setToolBusy?.(false); } catch {}

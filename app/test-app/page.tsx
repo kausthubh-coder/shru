@@ -451,15 +451,15 @@ export default function TestAppPage() {
     try {
       const token = await fetchEphemeralToken();
       const mod = await import("@openai/agents/realtime");
-      const { tool } = mod as any;
 
       // Create runtime bridges used by modular tools
       const runtime: AgentRuntime = buildRuntime({
         editorRef,
         sessionRef,
         appendLog,
-        onToolEvent: (e) => {
-          try { setToolEvents((prev: Array<ToolEvent>) => [e as any, ...prev].slice(0, 100)); } catch {}
+        onToolEvent: (evt) => {
+          const e = evt as ToolEvent;
+          try { setToolEvents((prev: Array<ToolEvent>) => [e, ...prev].slice(0, 100)); } catch {}
           try {
             if (currentTurnRef.current) {
               currentTurnRef.current.tools = currentTurnRef.current.tools || [];

@@ -4,6 +4,10 @@ import {
   getViewportScreenshot,
 } from "@/lib/viewContext";
 
+type ViewContextEditor = Parameters<typeof getViewContext>[0];
+type TransportLike = { sendEvent?: (evt: unknown) => void };
+type SessionLike = { transport?: TransportLike };
+
 export async function sendAutoContext(
   editorRef: MutableRefObject<unknown>,
   agentRef: MutableRefObject<unknown>,
@@ -14,11 +18,11 @@ export async function sendAutoContext(
   ideSnapshot?: { name: string; language: string; content: string } | null,
   notesYaml?: string,
 ): Promise<'ok' | 'no-session' | 'error'> {
-  const session = sessionRef.current;
+  const session = sessionRef.current as SessionLike | null;
   const transport = session?.transport;
-  if (!transport) return 'no-session';
+  if (!transport || typeof transport.sendEvent !== "function") return 'no-session';
   try {
-    const ctx = getViewContext(editorRef.current, agentRef.current);
+    const ctx = getViewContext(editorRef.current as ViewContextEditor, agentRef.current);
     const whiteboard = {
       bounds: ctx.bounds,
       blurryShapes: Array.isArray(ctx.blurryShapes) ? ctx.blurryShapes.slice(0, 60) : [],
@@ -37,7 +41,7 @@ export async function sendAutoContext(
       type: 'conversation.item.create',
       item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
     });
-    const url = await getViewportScreenshot(editorRef.current);
+    const url = await getViewportScreenshot(editorRef.current as ViewContextEditor);
     if (url && url !== 'null') {
       appendLog(`[transport] conversation.item.create (auto-context image length=${url.length})`);
       transport.sendEvent({
