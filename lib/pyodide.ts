@@ -6,11 +6,7 @@ type PyodideInstance = {
     runPythonAsync: (code: string) => Promise<unknown>;
 };
 
-declare global {
-    interface Window {
-        loadPyodide?: (opts: { indexURL: string }) => Promise<PyodideInstance>;
-    }
-}
+type PyodideLoader = (opts: { indexURL: string }) => Promise<unknown>;
 
 let pyodideInstancePromise: Promise<PyodideInstance> | null = null;
 
@@ -23,10 +19,11 @@ export async function loadPyodideOnce() {
             script.onerror = reject;
             document.head.appendChild(script);
         }).then(() => {
-            if (!window.loadPyodide) throw new Error("Pyodide loader not found");
-            return window.loadPyodide({
+            const loader = (window as Window & { loadPyodide?: PyodideLoader }).loadPyodide;
+            if (!loader) throw new Error("Pyodide loader not found");
+            return loader({
                 indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.0/full/",
-            });
+            }) as Promise<PyodideInstance>;
         });
     }
     return pyodideInstancePromise;

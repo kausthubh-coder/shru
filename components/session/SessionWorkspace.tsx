@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { Tldraw } from "tldraw";
+import type { Editor } from "tldraw";
 import { toRichText } from "@tldraw/tlschema";
 import "tldraw/tldraw.css";
 import { useQuery, useMutation } from "convex/react";
@@ -30,26 +31,6 @@ import {
   NotesDocT,
   parseNotesYaml,
 } from "@/types/notesYaml";
-
-type TldrawEditor = {
-  createShape: (shape: unknown) => void;
-  deleteShape?: (shapeId: string) => void;
-  deleteShapes?: (shapeIds: string[]) => void;
-  updateShapes?: (shapes: Array<Record<string, unknown>>) => void;
-  loadSnapshot?: (snapshot: unknown) => void;
-  getSnapshot?: () => unknown;
-  getViewportPageBounds?: () => { collides: (bounds: unknown) => boolean } | null;
-  getCurrentPageShapesSorted?: () => Array<unknown>;
-  getShapeMaskedPageBounds?: (shape: unknown) => { collides: (bounds: unknown) => boolean } | null;
-  getShape?: (id: string) => unknown;
-  getCurrentPageShapeIds?: () => string[];
-  zoomToBounds?: (bounds: { x?: number; y?: number; w?: number; h?: number }) => void;
-  store?: {
-    loadSnapshot?: (snapshot: unknown) => void;
-    getSnapshot?: () => unknown;
-    listen?: (fn: () => void, opts?: { scope?: string; source?: string }) => () => void;
-  };
-};
 
 type AgentHandle = {
   act: (action: Record<string, unknown>) => { diff: unknown; promise: Promise<unknown> };
@@ -134,7 +115,7 @@ export default function SessionWorkspace({
   sessionId: Id<"sessions">;
   enabledTools?: ("whiteboard" | "code" | "notes")[];
 }) {
-  const editorRef = useRef<TldrawEditor | null>(null);
+  const editorRef = useRef<Editor | null>(null);
   const agentRef = useRef<AgentHandle | null>(null);
   const [editorReady, setEditorReady] = useState(false);
 
@@ -334,8 +315,9 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
     try {
       if (typeof editorRef.current.loadSnapshot === "function") {
         editorRef.current.loadSnapshot(snapshot);
-      } else if (editorRef.current.store?.loadSnapshot) {
-        editorRef.current.store.loadSnapshot(snapshot);
+        } else {
+          const store = editorRef.current.store as { loadSnapshot?: (snap: unknown) => void } | undefined;
+          store?.loadSnapshot?.(snapshot);
       }
     } catch (err) {
       console.error("Failed to load whiteboard snapshot", err);
@@ -352,7 +334,7 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
         try {
           const snap =
             editor.getSnapshot?.() ??
-            editor.store?.getSnapshot?.() ??
+            (editor.store as { getSnapshot?: () => unknown } | undefined)?.getSnapshot?.() ??
             null;
           if (!snap) return;
           pendingWhiteboardSnapshotRef.current = snap;
@@ -692,6 +674,36 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
 
   // Removed floating Python windows in favor of full-page IDE
 
+  // Soft language guard: if the model drifts away from English, gently re-assert
+  const maybeReassertLanguage = useCallback((delta: string) => {
+    try {
+      const nonAscii = delta.replace(/[\x00-\x7F]/g, "").length;
+      if (nonAscii > 8) {
+        const session = sessionRef.current;
+        appendLog("[language] reassert English preference via session.update");
+        session?.transport?.sendEvent?.({
+          type: "session.update",
+          session: {
+            type: "realtime",
+            instructions: buildPersonaInstructions("default"),
+            audio: {
+              input: {
+                format: { type: "audio/pcm", rate: 24000 },
+                turn_detection: {
+                  type: "semantic_vad",
+                  eagerness: "medium",
+                  create_response: true,
+                  interrupt_response: true,
+                },
+              },
+              output: { format: { type: "audio/pcm" }, voice: "marin" },
+            },
+          },
+        });
+      }
+    } catch {}
+  }, [appendLog]);
+
   // Voice agent start/stop with tools
   const startAgent = useCallback(async () => {
     if (agentStatus !== "disconnected") return;
@@ -735,7 +747,8 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
           try {
             const editor = editorRef.current;
             if (!editor || typeof editor.getShape !== "function") return null;
-            const shape = editor.getShape(`shape:${shapeId}`);
+            const shapeGetter = editor as unknown as { getShape: (id: string) => unknown };
+            const shape = shapeGetter.getShape(`shape:${shapeId}`);
             if (!shape) return null;
             const shapeObj = shape as Record<string, unknown>;
             const rawId = String(shapeObj?.id ?? "");
@@ -763,7 +776,7 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
               }) ?? [];
             const items = shapes.map((shape) => {
               try {
-                const shapeObj = shape as Record<string, unknown>;
+                const shapeObj = shape as unknown as Record<string, unknown>;
                 const rawId = String(shapeObj?.id ?? "");
                 const shapeId = rawId.replace(/^shape:/, "");
                 const type = String(shapeObj?.type ?? "unknown");
@@ -1058,6 +1071,7 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
 
   const stopAgent = useCallback(async () => {
     if (agentStatus !== "connected") return;
+    const session = sessionRef.current as RealtimeSessionLike | null;
     try {
       await sessionHandleRef.current?.disconnect?.();
     } catch {}
@@ -1083,7 +1097,7 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
       }
     } catch {}
     // Close transport if available
-    try { sessionRef.current?.transport?.close?.(); } catch {}
+    try { session?.transport?.close?.(); } catch {}
     if (unsubTransportRef.current) {
       try { unsubTransportRef.current(); } catch {}
       unsubTransportRef.current = null;
@@ -1095,29 +1109,6 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
     try { await audioCtxRef.current?.close?.(); } catch {}
     audioCtxRef.current = null;
   }, [agentStatus, appendLog]);
-
-  // Soft language guard: if the model drifts away from English, gently re-assert
-  const maybeReassertLanguage = useCallback((delta: string) => {
-    try {
-      // Detect a high ratio of non-ASCII letters as a proxy for non-English
-      const nonAscii = delta.replace(/[\x00-\x7F]/g, '').length;
-      if (nonAscii > 8) {
-        const session = sessionRef.current;
-        appendLog('[language] reassert English preference via session.update');
-        session?.transport?.sendEvent?.({
-          type: 'session.update',
-          session: {
-            type: 'realtime',
-            instructions: buildPersonaInstructions('default'),
-            audio: {
-              input: { format: { type: 'audio/pcm', rate: 24000 }, turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: true, interrupt_response: true } },
-              output: { format: { type: 'audio/pcm' }, voice: 'marin' },
-            },
-          },
-        });
-      }
-    } catch {}
-  }, [appendLog]);
 
   const toggleMute = useCallback(() => {
     const next = !muted;
@@ -1284,19 +1275,31 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
                       }
                       
                       try { console.log('[tldraw:createShape]', shapePayload); } catch {}
-                      editor.createShape(shapePayload);
+                      editor.createShape(shapePayload as Parameters<Editor["createShape"]>[0]);
                     } else if (_type === 'delete') {
-                      if (restObj.shapeId) editor.deleteShape?.(`shape:${restObj.shapeId}`);
+                      if (restObj.shapeId) {
+                        const deleteId = `shape:${restObj.shapeId}` as unknown as Parameters<Editor["deleteShape"]>[0];
+                        editor.deleteShape?.(deleteId);
+                      }
                     } else if (_type === 'move') {
-                      if (restObj.shapeId) editor.updateShapes?.([{ id: `shape:${restObj.shapeId}`, type: 'geo', x: restObj.x, y: restObj.y }]);
+                      if (restObj.shapeId) {
+                        editor.updateShapes?.(
+                          [{ id: `shape:${restObj.shapeId}`, type: 'geo', x: restObj.x, y: restObj.y }] as Parameters<Editor["updateShapes"]>[0],
+                        );
+                      }
                     } else if (_type === 'label') {
                       // For v4.0.2, inline text on geo may be invalid; skip or switch to a dedicated text shape
                       try { console.warn('[tldraw:label] geo text not supported, skipping label change', { shapeId: restObj.shapeId, text: restObj.text }); } catch {}
                     } else if (_type === 'clear') {
-                      const ids = editor.getCurrentPageShapeIds();
-                      editor.deleteShapes?.(ids ?? []);
+                      const ids = Array.from(editor.getCurrentPageShapeIds() ?? []);
+                      editor.deleteShapes?.(ids as unknown as Parameters<Editor["deleteShapes"]>[0]);
                     } else if (_type === 'setMyView') {
-                      editor.zoomToBounds?.({ x: restObj.x, y: restObj.y, w: restObj.w, h: restObj.h });
+                      editor.zoomToBounds?.({
+                        x: restObj.x ?? 0,
+                        y: restObj.y ?? 0,
+                        w: restObj.w ?? 0,
+                        h: restObj.h ?? 0,
+                      });
                     }
                   } catch {}
                   return { diff: {}, promise: Promise.resolve() };
