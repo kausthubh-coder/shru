@@ -62,6 +62,14 @@ git switch -c "feature/<feature-name>" "origin/dev"
 
 Replace `<feature-name>` with a descriptive kebab-case name for the feature being built.
 
+### Step 5 Publish the branch to GitHub (set upstream)
+
+This creates the branch on the remote and sets tracking so future `git push` / `git pull` work without extra flags:
+
+```bash
+git push -u origin "feature/<feature-name>"
+```
+
 ## Parameters
 
 The feature name should be provided after the command:
