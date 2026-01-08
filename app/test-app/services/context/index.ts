@@ -14,6 +14,35 @@ function hashString(input: string): string {
   return (h >>> 0).toString(36);
 }
 
+export async function buildAutoContextPayload(
+  editorRef: React.MutableRefObject<any>,
+  agentRef: React.MutableRefObject<any>,
+  ideSnapshot?: { name: string; language: string; content: string } | null,
+  notesYaml?: string,
+): Promise<{ text: string; imageUrl: string | null; jsonHash: string; imageHash: string }> {
+  const ctx = getViewContext(editorRef.current, agentRef.current);
+  const whiteboard = {
+    bounds: (ctx as any).bounds,
+    blurryShapes: Array.isArray((ctx as any).blurryShapes) ? (ctx as any).blurryShapes.slice(0, 60) : [],
+    peripheralClusters: Array.isArray((ctx as any).peripheralClusters) ? (ctx as any).peripheralClusters.slice(0, 32) : [],
+    selectedShapes: Array.isArray((ctx as any).selectedShapes) ? (ctx as any).selectedShapes.slice(0, 20) : [],
+  };
+  const workspace = {
+    type: "workspace_context",
+    whiteboard,
+    ide: ideSnapshot ? { name: ideSnapshot.name, language: ideSnapshot.language, content: ideSnapshot.content } : null,
+    notes: { yaml: String(notesYaml ?? "") },
+  };
+  const text = JSON.stringify(workspace);
+  const jsonHash = hashString(text);
+
+  const imageUrl0 = await getViewportScreenshot(editorRef.current);
+  const imageUrl = imageUrl0 && imageUrl0 !== "null" ? imageUrl0 : null;
+  const imageHash = imageUrl ? hashString(imageUrl.slice(0, 512)) : "";
+
+  return { text, imageUrl, jsonHash, imageHash };
+}
+
 export async function sendAutoContext(
   editorRef: React.MutableRefObject<any>,
   agentRef: React.MutableRefObject<any>,
@@ -29,24 +58,11 @@ export async function sendAutoContext(
   if (!transport) return 'no-session';
 
   try {
-    const ctx = getViewContext(editorRef.current, agentRef.current);
-    const whiteboard = {
-      bounds: ctx.bounds,
-      blurryShapes: Array.isArray(ctx.blurryShapes) ? ctx.blurryShapes.slice(0, 60) : [],
-      peripheralClusters: Array.isArray(ctx.peripheralClusters) ? ctx.peripheralClusters.slice(0, 32) : [],
-      selectedShapes: Array.isArray(ctx.selectedShapes) ? ctx.selectedShapes.slice(0, 20) : [],
-    };
-    const workspace = {
-      type: 'workspace_context',
-      whiteboard,
-      ide: ideSnapshot ? { name: ideSnapshot.name, language: ideSnapshot.language, content: ideSnapshot.content } : null,
-      notes: { yaml: String(notesYaml ?? '') },
-    };
-    const text = JSON.stringify(workspace);
-    const jsonHash = hashString(text);
-
-    const imageUrl = await getViewportScreenshot(editorRef.current);
-    const imageHash = imageUrl && imageUrl !== 'null' ? hashString(imageUrl.slice(0, 512)) : '';
+    const built = await buildAutoContextPayload(editorRef, agentRef, ideSnapshot, notesYaml);
+    const text = built.text;
+    const imageUrl = built.imageUrl;
+    const jsonHash = built.jsonHash;
+    const imageHash = built.imageHash;
 
     const key = session as object;
     const last = key ? lastBySession.get(key) : undefined;
@@ -56,9 +72,11 @@ export async function sendAutoContext(
     }
 
     const content: Array<any> = [{ type: 'input_text', text }];
-    if (imageUrl && imageUrl !== 'null') content.push({ type: 'input_image', image_url: imageUrl });
+    if (imageUrl) content.push({ type: 'input_image', image_url: imageUrl });
 
-    appendLog(`[transport] conversation.item.create (auto-context combined parts: text ${text.length} chars${imageUrl ? `, image length=${imageUrl.length}` : ''})`);
+    appendLog(
+      `[transport] conversation.item.create (auto-context combined parts: text ${text.length} chars${imageUrl ? `, image length=${imageUrl.length}` : ""})`,
+    );
     transport.sendEvent({
       type: 'conversation.item.create',
       item: { type: 'message', role: 'user', content },

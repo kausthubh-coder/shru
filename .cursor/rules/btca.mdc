@@ -1,0 +1,19 @@
+---
+alwaysApply: true
+---
+
+## btca
+
+Trigger: user says "use btca" (for codebase/docs questions).
+
+Run:
+- btca ask -t <tech> -q "<question>"
+
+Available <tech>: nextjs, tailwindcss, convex, ai-sdk, tldraw
+
+## how to strucutre your asks:
+you can only ask question about the tech your refering to, if you need to know about multiple technoligies do mulitple command for each technolgy
+
+and you cant ask question about thr project your working on for example 
+- btca ask -t nextjs -q "is the current implimentation best pratice for nextjs" 
+we cant do that since btca has no context about our code only the tech you refred like nextjs

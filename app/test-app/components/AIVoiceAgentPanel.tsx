@@ -13,6 +13,12 @@ export function AIVoiceAgentPanel({
   outputLevel,
   agentSpeaking,
   userSpeaking,
+  architecture,
+  setArchitecture,
+  plannerModel,
+  setPlannerModel,
+  plannerSystem,
+  setPlannerSystem,
   showLogs,
   setShowLogs,
   showContext,
@@ -41,6 +47,12 @@ export function AIVoiceAgentPanel({
   outputLevel: number;
   agentSpeaking: boolean;
   userSpeaking: boolean;
+  architecture: "realtime_tools" | "split_planner" | "specialists";
+  setArchitecture: (v: "realtime_tools" | "split_planner" | "specialists") => void;
+  plannerModel: string;
+  setPlannerModel: (v: string) => void;
+  plannerSystem: string;
+  setPlannerSystem: (v: string) => void;
   showLogs: boolean;
   setShowLogs: (v: (prev: boolean) => boolean) => void;
   showContext: boolean;
@@ -96,6 +108,33 @@ export function AIVoiceAgentPanel({
           </button>
           {devOpen && (
             <div className="absolute right-0 bottom-9 w-56 max-h-[50vh] overflow-auto rounded-lg border border-white/20 dark:border-white/10 bg-white/60 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl p-2 z-10">
+              <div className="text-[11px] text-slate-600 dark:text-slate-300 px-1 pb-1">Playground</div>
+              <div className="grid gap-1">
+                <label className="block text-[10px] px-1">Architecture</label>
+                <select
+                  className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40"
+                  value={architecture}
+                  onChange={(e) => setArchitecture(e.target.value as any)}
+                >
+                  <option value="realtime_tools">Realtime (single agent + tools)</option>
+                  <option value="split_planner">Split (voice + planner)</option>
+                  <option value="specialists">Specialists (router + per-space)</option>
+                </select>
+                <label className="block text-[10px] px-1 mt-2">Planner model (OpenRouter)</label>
+                <input
+                  className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40"
+                  value={plannerModel}
+                  onChange={(e) => setPlannerModel(e.target.value)}
+                  placeholder="e.g. openai/gpt-4o-mini"
+                />
+                <label className="block text-[10px] px-1 mt-2">Planner extra system</label>
+                <textarea
+                  className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40 min-h-[70px]"
+                  value={plannerSystem}
+                  onChange={(e) => setPlannerSystem(e.target.value)}
+                  placeholder="Optional constraints for the planner…"
+                />
+              </div>
               <div className="text-[11px] text-slate-600 dark:text-slate-300 px-1 pb-1">Toggles</div>
               <div className="grid gap-1">
                 <button
