@@ -91,6 +91,9 @@ export default function PlaygroundPage() {
   const [ideOutputs, setIdeOutputs] = useState<IdeOutput[]>([]);
   const [ideRunning, setIdeRunning] = useState(false);
 
+  const clearConsole = useCallback(() => setIdeOutputs([]), []);
+
+
   // Notes state
   const initialYaml: NotesDocT = {
     title: "Notes",
@@ -602,7 +605,18 @@ export default function PlaygroundPage() {
                 <div className="h-[25vh] border-t border-neutral-200 dark:border-neutral-800 bg-neutral-900 text-neutral-100 p-0 flex flex-col">
                   <div className="px-3 py-1.5 border-b border-neutral-800 bg-neutral-950 flex items-center justify-between">
                     <span className="text-[10px] uppercase tracking-wider font-semibold text-neutral-500">Console Output</span>
-                    <button onClick={clearConsole} className="text-[10px] text-neutral-400 hover:text-white">Clear</button>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          const text = ideOutputs.map(o => `[${new Date(o.ts).toLocaleTimeString()}] ${o.text}`).join('\n');
+                          navigator.clipboard.writeText(text);
+                        }} 
+                        className="text-[10px] text-neutral-400 hover:text-white"
+                      >
+                        Copy
+                      </button>
+                      <button onClick={clearConsole} className="text-[10px] text-neutral-400 hover:text-white">Clear</button>
+                    </div>
                   </div>
                   <div className="flex-1 p-2 overflow-auto font-mono text-xs">
                     {ideOutputs.length === 0 ? (

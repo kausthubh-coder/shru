@@ -1,9 +1,8 @@
-<<<<<<< Current (Your changes)
-=======
 /**
  * Typed event bus for playground observability
  * Enables real-time debugging and logging of agent interactions
  */
+
 
 export type PlaygroundEventMap = {
   // Voice agent events
@@ -150,4 +149,3 @@ export function getPlaygroundEventBus(): PlaygroundEventBus {
 export function createEventBus(): PlaygroundEventBus {
   return new PlaygroundEventBus();
 }
->>>>>>> Incoming (Background Agent changes)

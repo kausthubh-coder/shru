@@ -7,6 +7,7 @@ interface EventLogPanelProps {
   events: PlaygroundEvent[];
   onClear: () => void;
   onExport: () => void;
+  onCopy?: (text: string) => void;
   onClose: () => void;
 }
 
@@ -79,11 +80,29 @@ function formatEventData(data: Record<string, unknown>): string {
   return parts.join(" ");
 }
 
-export function EventLogPanel({ events, onClear, onExport, onClose }: EventLogPanelProps) {
+export function EventLogPanel({ events, onClear, onExport, onCopy, onClose }: EventLogPanelProps) {
   const [filter, setFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [autoScroll, setAutoScroll] = useState(true);
+  const [copied, setCopied] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = () => {
+    const text = filteredEvents.map(event => {
+      const timestamp = formatTimestamp((event.data as any).ts);
+      const dataStr = JSON.stringify(event.data, null, 2);
+      return `[${timestamp}] ${event.type}\n${dataStr}`;
+    }).join('\n\n---\n\n');
+    
+    if (onCopy) {
+      onCopy(text);
+    } else {
+      navigator.clipboard.writeText(text);
+    }
+    
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   // Auto-scroll to top when new events arrive
   useEffect(() => {
@@ -121,6 +140,17 @@ export function EventLogPanel({ events, onClear, onExport, onClose }: EventLogPa
             }`}
           >
             {autoScroll ? "Auto Scroll" : "Paused"}
+          </button>
+          <button
+            onClick={handleCopy}
+            className={`transition-colors ${copied ? "text-green-500" : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"}`}
+            title="Copy Logs"
+          >
+            {copied ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-5 4h5m-5 4h5m1 8l-4-4m0 0l-4 4m4-4V8" /></svg>
+            )}
           </button>
           <button
             onClick={onExport}

@@ -1,6 +1,5 @@
-<<<<<<< Current (Your changes)
-=======
 "use client";
+
 
 import type { RunPlannerParams, PlannerResult, SpaceContext } from "../types";
 import { buildPlannerSystemPrompt } from "./prompts";
@@ -290,4 +289,3 @@ export function gatherSpaceContext(runtime: import("../../types/toolContracts").
 
   return context;
 }
->>>>>>> Incoming (Background Agent changes)
