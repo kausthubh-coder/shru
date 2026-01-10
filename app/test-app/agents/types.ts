@@ -119,7 +119,7 @@ export const DEFAULT_PLAYGROUND_CONFIG: PlaygroundConfig = {
     instructions: "You are a helpful AI tutor. Listen to the user and help them learn.",
   },
   planner: {
-    model: "google/gemini-2.0-flash-exp",
+    model: "google/gemini-3-flash-preview",
     systemPrompt: "",  // Will be set dynamically
     maxSteps: 10,
     temperature: 0.7,
