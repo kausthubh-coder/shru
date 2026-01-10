@@ -61,21 +61,53 @@ export async function POST(req: Request) {
       temperature: temperature ?? 0.7,
     });
 
-    // Extract tool calls from steps
-    const toolCalls: Array<{ name: string; args: unknown }> = [];
+    // Extract tool calls from steps and direct toolCalls
+    const toolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
     
+    // Debug: log the raw result structure
+    console.log("[planner/route] Result keys:", Object.keys(result));
+    console.log("[planner/route] Steps count:", result.steps?.length);
+    console.log("[planner/route] Direct toolCalls:", JSON.stringify(result.toolCalls, null, 2));
+    
+    // Check direct toolCalls first (single-step)
+    if (result.toolCalls && Array.isArray(result.toolCalls)) {
+      for (const tc of result.toolCalls) {
+        console.log("[planner/route] Direct tool call:", JSON.stringify(tc, null, 2));
+        const args = (tc.args && typeof tc.args === "object" && !Array.isArray(tc.args))
+          ? (tc.args as Record<string, unknown>)
+          : {};
+        toolCalls.push({
+          name: tc.toolName,
+          args,
+        });
+      }
+    }
+    
+    // Also check steps for multi-step tool use
     if (result.steps) {
       for (const step of result.steps) {
+        console.log("[planner/route] Step toolCalls:", JSON.stringify(step.toolCalls, null, 2));
         if (step.toolCalls) {
           for (const tc of step.toolCalls) {
-            toolCalls.push({
-              name: tc.toolName,
-              args: tc.args,
-            });
+            console.log("[planner/route] Step tool call raw:", JSON.stringify(tc, null, 2));
+            // Ensure args is always a valid object, never undefined
+            const args = (tc.args && typeof tc.args === "object" && !Array.isArray(tc.args))
+              ? (tc.args as Record<string, unknown>)
+              : {};
+            // Avoid duplicates - check if already added from direct toolCalls
+            const exists = toolCalls.some(t => t.name === tc.toolName && JSON.stringify(t.args) === JSON.stringify(args));
+            if (!exists) {
+              toolCalls.push({
+                name: tc.toolName,
+                args,
+              });
+            }
           }
         }
       }
     }
+
+    console.log("[planner/route] Final toolCalls:", JSON.stringify(toolCalls, null, 2));
 
     return NextResponse.json({
       text: result.text,

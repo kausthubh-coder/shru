@@ -51,22 +51,33 @@ export async function runPlanner(params: RunPlannerParams): Promise<PlannerResul
 
     if (result.toolCalls && Array.isArray(result.toolCalls)) {
       for (const toolCall of result.toolCalls) {
-        eventBus.emit("planner:tool_call", { name: toolCall.name, args: toolCall.args });
+        // Ensure toolCall has required properties
+        const toolName = toolCall?.name || toolCall?.toolName;
+        const toolArgs = toolCall?.args ?? {};
+        
+        if (!toolName) {
+          console.warn("[runPlanner] Skipping tool call with missing name:", toolCall);
+          continue;
+        }
+
+        // Log the full tool call for debugging
+        console.log("[runPlanner] Executing tool:", toolName, "with args:", JSON.stringify(toolArgs, null, 2));
+        eventBus.emit("planner:tool_call", { name: toolName });
 
         const toolStartTs = Date.now();
         try {
-          const toolResult = await executeToolLocally(toolCall.name, toolCall.args, runtime);
+          const toolResult = await executeToolLocally(toolName, toolArgs, runtime);
           const toolDuration = Date.now() - toolStartTs;
 
           eventBus.emit("planner:tool_result", {
-            name: toolCall.name,
+            name: toolName,
             result: toolResult,
             durationMs: toolDuration,
           });
 
           executedTools.push({
-            name: toolCall.name,
-            args: toolCall.args,
+            name: toolName,
+            args: toolArgs,
             result: toolResult,
           });
         } catch (toolError) {
@@ -74,14 +85,14 @@ export async function runPlanner(params: RunPlannerParams): Promise<PlannerResul
           const errorMsg = toolError instanceof Error ? toolError.message : String(toolError);
           
           eventBus.emit("tool:error", {
-            name: toolCall.name,
+            name: toolName,
             error: errorMsg,
             durationMs: toolDuration,
           });
 
           executedTools.push({
-            name: toolCall.name,
-            args: toolCall.args,
+            name: toolName,
+            args: toolArgs,
             result: { error: errorMsg },
           });
         }
@@ -117,6 +128,28 @@ export async function runPlanner(params: RunPlannerParams): Promise<PlannerResul
 }
 
 /**
+ * Flatten nested args - some models return { input: { x: 1 } } instead of { x: 1 }
+ */
+function flattenArgs(args: unknown): Record<string, unknown> {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    return {};
+  }
+  
+  const obj = args as Record<string, unknown>;
+  
+  // Check for common wrapper patterns from different models
+  // Some models wrap args in 'input', 'arguments', 'parameters', or 'properties'
+  for (const wrapperKey of ["input", "arguments", "parameters", "properties", "args"]) {
+    if (obj[wrapperKey] && typeof obj[wrapperKey] === "object" && !Array.isArray(obj[wrapperKey])) {
+      console.log(`[flattenArgs] Found nested args in '${wrapperKey}':`, obj[wrapperKey]);
+      return obj[wrapperKey] as Record<string, unknown>;
+    }
+  }
+  
+  return obj;
+}
+
+/**
  * Execute a tool call locally using the runtime
  */
 async function executeToolLocally(
@@ -124,43 +157,67 @@ async function executeToolLocally(
   args: unknown,
   runtime: import("../../types/toolContracts").AgentRuntime
 ): Promise<unknown> {
-  const typedArgs = args as Record<string, unknown>;
+  // Ensure args is an object, handle nested wrappers
+  const typedArgs = flattenArgs(args);
+  console.log("[executeToolLocally]", toolName, "flattened args:", JSON.stringify(typedArgs));
+
+  // Helper to get default coordinates (center of viewport or fallback)
+  const getDefaultCoords = () => {
+    try {
+      const ctx = runtime.whiteboard.getViewContext() as { viewport?: { x?: number; y?: number; w?: number; h?: number } } | null;
+      if (ctx?.viewport) {
+        return {
+          x: (ctx.viewport.x ?? 0) + (ctx.viewport.w ?? 800) / 2 - 50,
+          y: (ctx.viewport.y ?? 0) + (ctx.viewport.h ?? 600) / 2 - 40,
+        };
+      }
+    } catch {}
+    return { x: 100, y: 100 };
+  };
 
   // Whiteboard tools
   if (toolName === "agent_create_shape" || toolName === "agent_create") {
+    const defaults = getDefaultCoords();
+    const x = typeof typedArgs.x === "number" ? typedArgs.x : defaults.x;
+    const y = typeof typedArgs.y === "number" ? typedArgs.y : defaults.y;
+    
     await runtime.whiteboard.dispatchAction({
       _type: "create",
       intent: `Create ${typedArgs.geo || "rectangle"}`,
       shape: {
         _type: typedArgs.geo || "rectangle",
         shapeId: Math.random().toString(36).slice(2),
-        x: typedArgs.x,
-        y: typedArgs.y,
+        x,
+        y,
         w: typedArgs.w || 100,
         h: typedArgs.h || 80,
         color: typedArgs.color || "black",
         fill: typedArgs.fill || "none",
       },
     });
-    return { status: "ok", summary: `Created shape at (${typedArgs.x}, ${typedArgs.y})` };
+    return { status: "ok", summary: `Created shape at (${x}, ${y})` };
   }
 
   if (toolName === "agent_create_text") {
+    const defaults = getDefaultCoords();
+    const x = typeof typedArgs.x === "number" ? typedArgs.x : defaults.x;
+    const y = typeof typedArgs.y === "number" ? typedArgs.y : defaults.y;
+    
     await runtime.whiteboard.dispatchAction({
       _type: "create",
       intent: "Create text",
       shape: {
         _type: "text",
         shapeId: Math.random().toString(36).slice(2),
-        x: typedArgs.x,
-        y: typedArgs.y,
+        x,
+        y,
         w: typedArgs.w || 220,
         h: typedArgs.h || 60,
-        text: String(typedArgs.text || ""),
+        text: String(typedArgs.text || "Hello"),
         color: typedArgs.color || "black",
       },
     });
-    return { status: "ok", summary: `Created text at (${typedArgs.x}, ${typedArgs.y})` };
+    return { status: "ok", summary: `Created text "${typedArgs.text || 'Hello'}" at (${x}, ${y})` };
   }
 
   if (toolName === "agent_move") {
