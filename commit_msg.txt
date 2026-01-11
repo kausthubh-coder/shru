@@ -1,0 +1,8 @@
+feat: add LaTeX support and custom interactive blocks to lesson system
+
+- Implement LaTeX math rendering using remark-math and rehype-katex in NotesRenderer
+- Add 'custom' block type for sandboxed HTML/CSS/JS interactive content
+- Update Zod schemas in types/notesYaml.ts to include CustomBlock
+- Update AI tutor instructions to guide the model on using LaTeX and custom blocks
+- Add katex, rehype-katex, and remark-math dependencies
+- Synchronize changes across main components and test-app versions

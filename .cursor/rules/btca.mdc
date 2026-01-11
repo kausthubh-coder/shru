@@ -9,7 +9,7 @@ Trigger: user says "use btca" (for codebase/docs questions).
 Run:
 - btca ask -t <tech> -q "<question>"
 
-Available <tech>: nextjs, tailwindcss, convex, ai-sdk, tldraw
+Available <tech>: nextjs, tailwindcss, convex, ai-sdk, tldraw, svelte, daytona, tanstack-docs, supermemory, openai-agents-js, openai-realtime-agents
 
 ## how to strucutre your asks:
 you can only ask question about the tech your refering to, if you need to know about multiple technoligies do mulitple command for each technolgy

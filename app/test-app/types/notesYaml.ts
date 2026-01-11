@@ -43,11 +43,22 @@ export const EmbedBlock = z.object({
   height: z.number().min(200).max(1200).default(360),
 });
 
+export const CustomBlock = z.object({
+  type: z.literal("custom"),
+  id,
+  title: z.string().optional(),
+  html: z.string().max(50000),
+  css: z.string().max(20000).optional(),
+  js: z.string().max(50000).optional(),
+  height: z.number().min(100).max(2000).default(400),
+});
+
 export const Block = z.discriminatedUnion("type", [
   TextBlock,
   QuizBlock,
   InputBlock,
   EmbedBlock,
+  CustomBlock,
 ]);
 
 export const NotesDoc = z
@@ -66,7 +77,7 @@ export const NotesDoc = z
       const ids = new Set<string>();
       for (const b of val.blocks) {
         // Require id on interactive blocks only (quiz, input, embed)
-        if (b.type === "quiz" || b.type === "input" || b.type === "embed") {
+        if (b.type === "quiz" || b.type === "input" || b.type === "embed" || b.type === "custom") {
           const blockId = (b as any).id as string;
           if (!blockId) {
             ctx.addIssue({
@@ -92,6 +103,7 @@ export type TextBlockT = z.infer<typeof TextBlock>;
 export type QuizBlockT = z.infer<typeof QuizBlock>;
 export type InputBlockT = z.infer<typeof InputBlock>;
 export type EmbedBlockT = z.infer<typeof EmbedBlock>;
+export type CustomBlockT = z.infer<typeof CustomBlock>;
 export type BlockT = z.infer<typeof Block>;
 export type NotesDocT = z.infer<typeof NotesDoc>;
 
