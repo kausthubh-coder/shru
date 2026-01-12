@@ -18,6 +18,9 @@ import { buildVoiceInstructions } from "./agents/voice/config";
 import { handleSpeechEnd } from "./agents/voice/bridge";
 import { gatherSpaceContext } from "./agents/planner/agent";
 
+// Cost tracking
+import { createCostTracker, type CostTracker } from "./services/costTracker";
+
 // Existing utilities
 import { loadPyodideOnce } from "./lib/pyodide";
 import { getViewContext as computeViewContext, getViewportScreenshot } from "./lib/viewContext";
@@ -43,6 +46,7 @@ export default function PlaygroundPage() {
   const audioCtxRef = useRef<any>(null);
   const rafRef = useRef<number | null>(null);
   const runtimeRef = useRef<AgentRuntime | null>(null);
+  const costTrackerRef = useRef<CostTracker | null>(null);
 
   // Use the playground hook for central state management
   const playground = usePlayground();
@@ -51,7 +55,7 @@ export default function PlaygroundPage() {
   // Local UI state
   const [activeTab, setActiveTab] = useState<"whiteboard" | "code" | "notes">("whiteboard");
   const [toolBusy, setToolBusy] = useState(false);
-  
+
   // Audio meters
   const [inputLevel, setInputLevel] = useState(0);
   const [outputLevel, setOutputLevel] = useState(0);
@@ -61,6 +65,9 @@ export default function PlaygroundPage() {
   const [agentStatus, setAgentStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
+
+  // Cost tracking state
+  const [sessionCost, setSessionCost] = useState<{ totalCostUsd: number; responseCount: number } | null>(null);
 
   // Device selection
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
@@ -76,7 +83,7 @@ export default function PlaygroundPage() {
       if (!isTool) {
         // console.log("[Playground Log]", line);
       }
-    } catch {}
+    } catch { }
   }, []);
 
   // IDE state
@@ -109,7 +116,7 @@ export default function PlaygroundPage() {
       const list = await navigator.mediaDevices.enumerateDevices();
       setInputDevices(list.filter((d) => d.kind === "audioinput"));
       setOutputDevices(list.filter((d) => d.kind === "audiooutput"));
-    } catch {}
+    } catch { }
   }, []);
 
   useEffect(() => {
@@ -252,7 +259,7 @@ export default function PlaygroundPage() {
             const next = { ...parsed.doc, blocks: [...parsed.doc.blocks, { type: "text", md: text } as any] };
             setNotesYaml(serializeNotesYaml(next));
           }
-        } catch {}
+        } catch { }
       },
     });
     runtimeRef.current = runtime;
@@ -284,12 +291,17 @@ export default function PlaygroundPage() {
     if (agentStatus !== "disconnected") return;
     setAgentStatus("connecting");
     eventBus.emit("voice:connecting", {});
-    
+
     try {
       const token = await fetchEphemeralToken();
       const runtime = buildRuntimeMemo();
       const mod = await import("@openai/agents/realtime");
       const tools = buildAllTools((def: any) => (mod as any).tool(def), runtime);
+
+      // Initialize cost tracker
+      const costTracker = createCostTracker(config.voice.model);
+      costTrackerRef.current = costTracker;
+      setSessionCost({ totalCostUsd: 0, responseCount: 0 });
 
       const handle = createRealtimeSessionHandle();
       sessionHandleRef.current = handle;
@@ -344,7 +356,7 @@ export default function PlaygroundPage() {
       // Wire up transport events
       handle.onAll((evt: any) => {
         if (!evt?.type) return;
-        
+
         if (evt.type === "input_audio_buffer.speech_started") {
           setUserSpeaking(true);
           eventBus.emit("voice:speech_start", {});
@@ -357,7 +369,7 @@ export default function PlaygroundPage() {
           if (config.architecture === "split_planner" && runtimeRef.current) {
             // Get transcript and route to planner
             const transcript = (evt as any).transcript || "User spoke";
-            
+
             handleSpeechEnd(transcript, {
               architecture: config.architecture,
               plannerConfig: config.planner,
@@ -387,6 +399,23 @@ export default function PlaygroundPage() {
         if (evt.type === "response.done") {
           setAgentSpeaking(false);
           eventBus.emit("voice:agent_speaking", { speaking: false });
+
+          // Track costs from response
+          if (costTrackerRef.current) {
+            const responseCost = costTrackerRef.current.processResponseDone(evt);
+            if (responseCost) {
+              const summary = costTrackerRef.current.getSessionSummary();
+              setSessionCost({ totalCostUsd: summary.totalCostUsd, responseCount: summary.responseCount });
+              eventBus.emit("cost:response", {
+                audioInputTokens: responseCost.audioInputTokens,
+                audioOutputTokens: responseCost.audioOutputTokens,
+                textInputTokens: responseCost.textInputTokens,
+                textOutputTokens: responseCost.textOutputTokens,
+                cachedInputTokens: responseCost.cachedInputTokens,
+                responseCostUsd: responseCost.costUsd,
+              });
+            }
+          }
         }
       });
 
@@ -396,7 +425,7 @@ export default function PlaygroundPage() {
       // Play audio
       if (audioRef.current) {
         audioRef.current.muted = false;
-        await audioRef.current.play().catch(() => {});
+        await audioRef.current.play().catch(() => { });
       }
     } catch (err: any) {
       setAgentStatus("disconnected");
@@ -409,17 +438,30 @@ export default function PlaygroundPage() {
     if (agentStatus !== "connected") return;
     try {
       await sessionHandleRef.current?.disconnect?.();
-    } catch {}
+    } catch { }
     sessionRef.current = null;
     sessionHandleRef.current = null;
     setAgentStatus("disconnected");
     setAgentSpeaking(false);
     setUserSpeaking(false);
+
+    // Emit final cost summary
+    if (costTrackerRef.current) {
+      const finalSummary = costTrackerRef.current.endSession();
+      eventBus.emit("cost:session_total", {
+        sessionId: finalSummary.sessionId,
+        totalCostUsd: finalSummary.totalCostUsd,
+        responseCount: finalSummary.responseCount,
+        durationSeconds: costTrackerRef.current.getDurationSeconds(),
+      });
+      costTrackerRef.current = null;
+    }
+    setSessionCost(null);
     eventBus.emit("voice:disconnected", {});
 
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    try { mediaStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
-    try { await audioCtxRef.current?.close?.(); } catch {}
+    try { mediaStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch { }
+    try { await audioCtxRef.current?.close?.(); } catch { }
   }, [agentStatus, eventBus]);
 
   const toggleMute = useCallback(() => {
@@ -439,7 +481,7 @@ export default function PlaygroundPage() {
       osc.connect(gain).connect(ctx.destination);
       osc.start();
       setTimeout(() => { osc.stop(); ctx.close(); }, 500);
-    } catch {}
+    } catch { }
   }, []);
 
   // Setup tldraw agent ref
@@ -548,6 +590,7 @@ export default function PlaygroundPage() {
             outputLevel={outputLevel}
             agentSpeaking={agentSpeaking}
             userSpeaking={userSpeaking}
+            sessionCost={sessionCost}
           />
         </div>
 
@@ -583,9 +626,8 @@ export default function PlaygroundPage() {
                     {ideRunning ? "Running…" : "Run Code"}
                   </button>
                   <button
-                    className={`text-xs px-3 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 font-medium transition-colors ${
-                      showConsole ? "bg-neutral-100 dark:bg-neutral-800" : "bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800"
-                    }`}
+                    className={`text-xs px-3 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 font-medium transition-colors ${showConsole ? "bg-neutral-100 dark:bg-neutral-800" : "bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                      }`}
                     onClick={() => setShowConsole(!showConsole)}
                   >
                     {showConsole ? "Hide Output" : "Show Output"}
@@ -606,11 +648,11 @@ export default function PlaygroundPage() {
                   <div className="px-3 py-1.5 border-b border-neutral-800 bg-neutral-950 flex items-center justify-between">
                     <span className="text-[10px] uppercase tracking-wider font-semibold text-neutral-500">Console Output</span>
                     <div className="flex items-center gap-2">
-                      <button 
+                      <button
                         onClick={() => {
                           const text = ideOutputs.map(o => `[${new Date(o.ts).toLocaleTimeString()}] ${o.text}`).join('\n');
                           navigator.clipboard.writeText(text);
-                        }} 
+                        }}
                         className="text-[10px] text-neutral-400 hover:text-white"
                       >
                         Copy

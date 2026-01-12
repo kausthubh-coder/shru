@@ -34,6 +34,24 @@ export type PlaygroundEventMap = {
   // General playground events
   "playground:config_changed": { ts: number; key: string; value: unknown };
   "playground:architecture_changed": { ts: number; architecture: string };
+
+  // Cost tracking events
+  "cost:response": {
+    ts: number;
+    audioInputTokens: number;
+    audioOutputTokens: number;
+    textInputTokens: number;
+    textOutputTokens: number;
+    cachedInputTokens: number;
+    responseCostUsd: number;
+  };
+  "cost:session_total": {
+    ts: number;
+    sessionId: string;
+    totalCostUsd: number;
+    responseCount: number;
+    durationSeconds: number;
+  };
 };
 
 export type PlaygroundEventType = keyof PlaygroundEventMap;

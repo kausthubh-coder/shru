@@ -17,6 +17,7 @@ const EVENT_COLORS: Record<string, string> = {
   tool: "text-cyan-400",
   context: "text-amber-400",
   playground: "text-slate-400",
+  cost: "text-emerald-400",
 };
 
 const EVENT_ICONS: Record<string, string> = {
@@ -38,6 +39,8 @@ const EVENT_ICONS: Record<string, string> = {
   "tool:error": "❌",
   "context:gathered": "📊",
   "context:sent": "📤",
+  "cost:response": "💰",
+  "cost:session_total": "📈",
 };
 
 function getEventCategory(type: PlaygroundEventType): string {
@@ -46,10 +49,10 @@ function getEventCategory(type: PlaygroundEventType): string {
 
 function formatTimestamp(ts: number): string {
   const date = new Date(ts);
-  return date.toLocaleTimeString("en-US", { 
-    hour12: false, 
-    hour: "2-digit", 
-    minute: "2-digit", 
+  return date.toLocaleTimeString("en-US", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
     second: "2-digit",
     fractionalSecondDigits: 3,
   });
@@ -58,11 +61,11 @@ function formatTimestamp(ts: number): string {
 function formatEventData(data: Record<string, unknown>): string {
   const { ts, ...rest } = data;
   if (Object.keys(rest).length === 0) return "";
-  
+
   const parts: string[] = [];
   for (const [key, value] of Object.entries(rest)) {
     if (value === undefined || value === null) continue;
-    
+
     if (typeof value === "string") {
       const display = value.length > 60 ? value.slice(0, 60) + "..." : value;
       parts.push(`${key}="${display}"`);
@@ -76,7 +79,7 @@ function formatEventData(data: Record<string, unknown>): string {
       parts.push(`${key}=${display}`);
     }
   }
-  
+
   return parts.join(" ");
 }
 
@@ -93,13 +96,13 @@ export function EventLogPanel({ events, onClear, onExport, onCopy, onClose }: Ev
       const dataStr = JSON.stringify(event.data, null, 2);
       return `[${timestamp}] ${event.type}\n${dataStr}`;
     }).join('\n\n---\n\n');
-    
+
     if (onCopy) {
       onCopy(text);
     } else {
       navigator.clipboard.writeText(text);
     }
-    
+
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -111,8 +114,8 @@ export function EventLogPanel({ events, onClear, onExport, onCopy, onClose }: Ev
     }
   }, [events.length, autoScroll]);
 
-  const filteredEvents = filter === "all" 
-    ? events 
+  const filteredEvents = filter === "all"
+    ? events
     : events.filter(e => getEventCategory(e.type) === filter);
 
   const toggleExpanded = (index: number) => {
@@ -135,9 +138,8 @@ export function EventLogPanel({ events, onClear, onExport, onCopy, onClose }: Ev
         <div className="flex items-center gap-2">
           <button
             onClick={() => setAutoScroll(!autoScroll)}
-            className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-              autoScroll ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
-            }`}
+            className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${autoScroll ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
+              }`}
           >
             {autoScroll ? "Auto Scroll" : "Paused"}
           </button>
@@ -177,15 +179,14 @@ export function EventLogPanel({ events, onClear, onExport, onCopy, onClose }: Ev
 
       {/* Filters */}
       <div className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 flex gap-2 shrink-0 overflow-x-auto">
-        {["all", "voice", "planner", "tool", "context"].map((f) => (
+        {["all", "voice", "planner", "tool", "context", "cost"].map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-2 py-1 rounded text-[10px] font-medium capitalize transition-colors ${
-              filter === f
-                ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
-                : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-700"
-            }`}
+            className={`px-2 py-1 rounded text-[10px] font-medium capitalize transition-colors ${filter === f
+              ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
+              : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-700"
+              }`}
           >
             {f}
           </button>
@@ -211,7 +212,7 @@ export function EventLogPanel({ events, onClear, onExport, onCopy, onClose }: Ev
                 key={idx}
                 className="bg-white dark:bg-neutral-900 rounded border border-neutral-200 dark:border-neutral-800 shadow-sm overflow-hidden"
               >
-                <div 
+                <div
                   className="px-3 py-2 flex items-start gap-2 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
                   onClick={() => toggleExpanded(idx)}
                 >
@@ -230,7 +231,7 @@ export function EventLogPanel({ events, onClear, onExport, onCopy, onClose }: Ev
                     )}
                   </div>
                 </div>
-                
+
                 {isExpanded && (
                   <div className="px-3 pb-3 pt-0 border-t border-neutral-100 dark:border-neutral-800 mt-1">
                     <pre className="text-[10px] text-neutral-600 dark:text-neutral-300 font-mono whitespace-pre-wrap pt-2">

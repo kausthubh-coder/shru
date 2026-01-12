@@ -11,6 +11,7 @@ export function AIVoiceAgentPanel({
   outputLevel,
   agentSpeaking,
   userSpeaking,
+  sessionCost,
 }: {
   agentStatus: "disconnected" | "connecting" | "connected";
   startAgent: () => Promise<void> | void;
@@ -22,6 +23,7 @@ export function AIVoiceAgentPanel({
   outputLevel: number;
   agentSpeaking: boolean;
   userSpeaking: boolean;
+  sessionCost?: { totalCostUsd: number; responseCount: number } | null;
 }) {
   const speaking = agentSpeaking || userSpeaking;
   const level = agentSpeaking ? Math.min(1, outputLevel * 6) : Math.min(1, inputLevel * 6);
@@ -31,28 +33,48 @@ export function AIVoiceAgentPanel({
     : (userSpeaking ? "bg-amber-500 shadow-lg shadow-amber-500/30" : "bg-neutral-400 dark:bg-neutral-600");
   const bubbleSize = 12 + Math.round(level * 16);
 
+  // Format cost display
+  const formatCost = (amount: number) => {
+    if (amount < 0.01) return `$${amount.toFixed(4)}`;
+    return `$${amount.toFixed(2)}`;
+  };
+
   return (
     <div className="flex items-center gap-3 px-4 py-2 rounded-full border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl">
       {/* Status Dot */}
       <div className="flex items-center gap-2">
-        <div className={`w-2.5 h-2.5 rounded-full ${
-          agentStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 
-          agentStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 
-          'bg-neutral-300 dark:bg-neutral-700'
-        }`} />
+        <div className={`w-2.5 h-2.5 rounded-full ${agentStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' :
+            agentStatus === 'connecting' ? 'bg-amber-500 animate-pulse' :
+              'bg-neutral-300 dark:bg-neutral-700'
+          }`} />
         <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300 w-20">
-          {agentStatus === 'connected' ? 'Connected' : 
-           agentStatus === 'connecting' ? 'Connecting...' : 
-           'Disconnected'}
+          {agentStatus === 'connected' ? 'Connected' :
+            agentStatus === 'connecting' ? 'Connecting...' :
+              'Disconnected'}
         </span>
       </div>
+
+      {/* Cost Display (when connected and has cost) */}
+      {agentStatus === 'connected' && sessionCost && sessionCost.responseCount > 0 && (
+        <>
+          <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800" />
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+              {formatCost(sessionCost.totalCostUsd)}
+            </span>
+            <span className="text-neutral-400 dark:text-neutral-500">
+              ({sessionCost.responseCount} {sessionCost.responseCount === 1 ? 'resp' : 'resps'})
+            </span>
+          </div>
+        </>
+      )}
 
       <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800" />
 
       {/* Controls */}
       <div className="flex items-center gap-2">
         {agentStatus !== "connected" ? (
-          <button 
+          <button
             className="px-4 py-1.5 rounded-full bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 text-xs font-semibold hover:opacity-90 transition-opacity"
             onClick={startAgent}
           >
@@ -60,12 +82,11 @@ export function AIVoiceAgentPanel({
           </button>
         ) : (
           <>
-            <button 
-              className={`p-2 rounded-full transition-colors ${
-                muted 
-                  ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' 
+            <button
+              className={`p-2 rounded-full transition-colors ${muted
+                  ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
                   : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700'
-              }`}
+                }`}
               onClick={toggleMute}
               title={muted ? "Unmute" : "Mute"}
             >
@@ -80,7 +101,7 @@ export function AIVoiceAgentPanel({
                 </svg>
               )}
             </button>
-            <button 
+            <button
               className="px-4 py-1.5 rounded-full border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
               onClick={stopAgent}
             >
@@ -92,9 +113,9 @@ export function AIVoiceAgentPanel({
 
       {/* Visualizer */}
       <div className="w-8 h-8 grid place-items-center">
-        <div 
-          className={`rounded-full transition-all duration-75 ease-out ${bubbleClass}`} 
-          style={{ width: `${bubbleSize}px`, height: `${bubbleSize}px` }} 
+        <div
+          className={`rounded-full transition-all duration-75 ease-out ${bubbleClass}`}
+          style={{ width: `${bubbleSize}px`, height: `${bubbleSize}px` }}
         />
       </div>
 
