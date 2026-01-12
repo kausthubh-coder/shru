@@ -639,9 +639,9 @@ export default function PlaygroundPage() {
           {activeTab === "notes" && (
             <div className="absolute inset-0 grid" style={{ gridTemplateColumns: showYaml ? "1fr 1fr" : "1fr" }}>
               {showYaml && (
-                <div className="p-0 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 overflow-auto">
-                  <div className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 font-mono text-xs font-medium text-neutral-500 uppercase">YAML Source</div>
-                  <div className="p-4">
+                <div className="p-0 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 flex flex-col min-h-0">
+                  <div className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 font-mono text-xs font-medium text-neutral-500 uppercase flex-shrink-0">YAML Source</div>
+                  <div className="flex-1 p-4 min-h-0">
                     <NotesEditor value={notesYaml} onChange={setNotesYaml} />
                   </div>
                 </div>

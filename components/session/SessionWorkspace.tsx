@@ -1401,7 +1401,7 @@ type ToolEvent = { ts: number; rid: string; name: string; status: 'start'|'done'
         {activeTab === "notes" && enabledTools.includes("notes") && (
           <div className="absolute inset-0 grid" style={{ gridTemplateColumns: showYaml ? '1fr 1fr' : '1fr' }}>
             {showYaml && (
-              <div className="p-4 bg-white/60 dark:bg-slate-900/40 backdrop-blur overflow-auto">
+              <div className="p-4 bg-white/60 dark:bg-slate-900/40 backdrop-blur flex flex-col min-h-0">
                 <NotesEditor value={notesYaml} onChange={setNotesYaml} />
               </div>
             )}

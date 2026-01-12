@@ -1,0 +1,6 @@
+ui: expand YAML editor to fill available vertical space
+
+- Update NotesEditor component to use height="100%" for Monaco editor
+- Change parent containers in Playground and SessionWorkspace to flex-col with min-h-0
+- Remove overflow-auto from parent wrappers to allow editor internal scrolling
+- Ensures YAML source editor stretches to full height of the sidebar
