@@ -1,0 +1,6 @@
+fix: resolve LaTeX rendering and improve markdown typography
+
+- Remove rehype-sanitize which was stripping KaTeX generated HTML elements
+- Install and configure @tailwindcss/typography plugin for Tailwind v4
+- Add prose-lg and custom vertical spacing classes to NotesRenderer
+- Ensure consistent rendering across main and test-app lesson components

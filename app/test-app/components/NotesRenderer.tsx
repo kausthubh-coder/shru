@@ -4,8 +4,6 @@ import React, { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import rehypeRaw from "rehype-raw";
-import rehypeSanitize from "rehype-sanitize";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { parseNotesYaml, NotesDocT, BlockT } from "../types/notesYaml";
@@ -61,8 +59,8 @@ function BlockView({ block }: { block: BlockT }) {
   switch (block.type) {
     case "text":
       return (
-        <div className="prose prose-invert max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw, rehypeSanitize]}>
+        <div className="prose prose-invert prose-lg max-w-none prose-headings:mt-8 prose-headings:mb-4 prose-p:my-4 prose-hr:my-8">
+          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
             {block.md}
           </ReactMarkdown>
         </div>
