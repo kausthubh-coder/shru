@@ -1,17 +1,17 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { 
-  PlaygroundConfig, 
-  PlannerConfig, 
+import type {
+  PlaygroundConfig,
+  PlannerConfig,
   PlaygroundArchitecture,
   SpaceContext,
 } from "../agents/types";
 import { DEFAULT_PLAYGROUND_CONFIG } from "../agents/types";
-import { 
-  PlaygroundEventBus, 
-  createEventBus, 
-  type PlaygroundEvent 
+import {
+  PlaygroundEventBus,
+  createEventBus,
+  type PlaygroundEvent,
 } from "../lib/eventBus";
 import { buildVoiceInstructions } from "../agents/voice/config";
 import { handleSpeechEnd, shouldUsePlanner } from "../agents/voice/bridge";
@@ -39,16 +39,21 @@ export interface UsePlaygroundReturn {
   setAgentSpeaking: (speaking: boolean) => void;
 
   // Planner integration
-  handleUserSpeechEnd: (transcript: string, runtime: AgentRuntime) => Promise<void>;
+  handleUserSpeechEnd: (
+    transcript: string,
+    runtime: AgentRuntime,
+  ) => Promise<void>;
   lastPlannerResponse: string | null;
 
   // Context
-  gatherContext: (runtime: AgentRuntime) => SpaceContext;
+  gatherContext: (runtime: AgentRuntime) => Promise<SpaceContext>;
 }
 
 export function usePlayground(): UsePlaygroundReturn {
   // Configuration state
-  const [config, setConfig] = useState<PlaygroundConfig>(DEFAULT_PLAYGROUND_CONFIG);
+  const [config, setConfig] = useState<PlaygroundConfig>(
+    DEFAULT_PLAYGROUND_CONFIG,
+  );
 
   // Event bus (singleton per hook instance)
   const eventBusRef = useRef<PlaygroundEventBus | null>(null);
@@ -61,12 +66,16 @@ export function usePlayground(): UsePlaygroundReturn {
   const [events, setEvents] = useState<PlaygroundEvent[]>([]);
 
   // Voice agent state
-  const [agentStatus, setAgentStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
+  const [agentStatus, setAgentStatus] = useState<
+    "disconnected" | "connecting" | "connected"
+  >("disconnected");
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
 
   // Planner state
-  const [lastPlannerResponse, setLastPlannerResponse] = useState<string | null>(null);
+  const [lastPlannerResponse, setLastPlannerResponse] = useState<string | null>(
+    null,
+  );
 
   // Subscribe to all events for UI updates
   useEffect(() => {
@@ -77,22 +86,30 @@ export function usePlayground(): UsePlaygroundReturn {
   }, [eventBus]);
 
   // Update config
-  const updateConfig = useCallback((updates: Partial<PlaygroundConfig>) => {
-    setConfig((prev) => {
-      const next = { ...prev, ...updates };
-      
-      // Update voice instructions when architecture changes
-      if (updates.architecture && updates.architecture !== prev.architecture) {
-        next.voice = {
-          ...next.voice,
-          instructions: buildVoiceInstructions(updates.architecture),
-        };
-        eventBus.emit("playground:architecture_changed", { architecture: updates.architecture });
-      }
-      
-      return next;
-    });
-  }, [eventBus]);
+  const updateConfig = useCallback(
+    (updates: Partial<PlaygroundConfig>) => {
+      setConfig((prev) => {
+        const next = { ...prev, ...updates };
+
+        // Update voice instructions when architecture changes
+        if (
+          updates.architecture &&
+          updates.architecture !== prev.architecture
+        ) {
+          next.voice = {
+            ...next.voice,
+            instructions: buildVoiceInstructions(updates.architecture),
+          };
+          eventBus.emit("playground:architecture_changed", {
+            architecture: updates.architecture,
+          });
+        }
+
+        return next;
+      });
+    },
+    [eventBus],
+  );
 
   // Update planner config
   const updatePlannerConfig = useCallback((updates: Partial<PlannerConfig>) => {
@@ -114,40 +131,51 @@ export function usePlayground(): UsePlaygroundReturn {
   }, [eventBus]);
 
   // Handle user speech end - main bridge to planner
-  const handleUserSpeechEnd = useCallback(async (transcript: string, runtime: AgentRuntime) => {
-    eventBus.emit("voice:speech_end", { transcript });
+  const handleUserSpeechEnd = useCallback(
+    async (transcript: string, runtime: AgentRuntime) => {
+      eventBus.emit("voice:speech_end", { transcript });
 
-    // In split_planner mode, check if we should use planner
-    if (config.architecture === "split_planner" && shouldUsePlanner(transcript)) {
-      const result = await handleSpeechEnd(transcript, {
-        architecture: config.architecture,
-        plannerConfig: config.planner,
-        runtime,
-        eventBus,
-        onPlannerResponse: (text) => {
-          setLastPlannerResponse(text);
-        },
-        appendLog: (line) => console.log("[playground]", line),
-      });
+      // In split_planner mode, check if we should use planner
+      if (
+        config.architecture === "split_planner" &&
+        shouldUsePlanner(transcript)
+      ) {
+        const result = await handleSpeechEnd(transcript, {
+          architecture: config.architecture,
+          plannerConfig: config.planner,
+          runtime,
+          eventBus,
+          onPlannerResponse: (text) => {
+            setLastPlannerResponse(text);
+          },
+          appendLog: (line) => console.log("[playground]", line),
+        });
 
-      if (result.handled && result.responseText) {
-        setLastPlannerResponse(result.responseText);
+        if (result.handled && result.responseText) {
+          setLastPlannerResponse(result.responseText);
+        }
       }
-    }
-  }, [config.architecture, config.planner, eventBus]);
+    },
+    [config.architecture, config.planner, eventBus],
+  );
 
   // Gather context from runtime
-  const gatherContext = useCallback((runtime: AgentRuntime): SpaceContext => {
-    const context = gatherSpaceContext(runtime);
-    
-    eventBus.emit("context:gathered", {
-      spaces: Object.keys(context).filter(k => context[k as keyof SpaceContext]) as any[],
-      charCount: JSON.stringify(context).length,
-      hasImage: !!context.whiteboard?.screenshot,
-    });
+  const gatherContext = useCallback(
+    async (runtime: AgentRuntime): Promise<SpaceContext> => {
+      const context = await gatherSpaceContext(runtime);
 
-    return context;
-  }, [eventBus]);
+      eventBus.emit("context:gathered", {
+        spaces: Object.keys(context).filter(
+          (k) => context[k as keyof SpaceContext],
+        ) as any[],
+        charCount: JSON.stringify(context).length,
+        hasImage: !!context.whiteboard?.screenshot,
+      });
+
+      return context;
+    },
+    [eventBus],
+  );
 
   return {
     // Config

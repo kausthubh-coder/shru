@@ -45,23 +45,46 @@ Keep it short for voice playback.`);
 
   // Add whiteboard context
   if (context.whiteboard) {
-    const { viewport, shapes } = context.whiteboard;
+    const { viewport, shapes, selectedShapes, screenshot } = context.whiteboard;
     const startX = Math.round(viewport.x + 50);
     const startY = Math.round(viewport.y + 50);
+    const selected = selectedShapes ?? [];
     parts.push(`
 ## Whiteboard - USE THIS for diagrams and visual explanations!
 Viewport: x=${viewport.x}, y=${viewport.y}, width=${viewport.w}, height=${viewport.h}
-${shapes.length > 0 
-  ? `Existing shapes (${shapes.length}):
-${shapes.slice(0, 10).map(s => `  - ${s.type} "${s.text || ''}" at (${Math.round(s.x)}, ${Math.round(s.y)})`).join('\n')}
-${shapes.length > 10 ? `  ... and ${shapes.length - 10} more` : ''}`
-  : 'Canvas is empty - perfect for drawing diagrams!'}
+Screenshot available: ${screenshot ? "yes" : "no"}
+${
+  shapes.length > 0
+    ? `Existing shapes (${shapes.length}):
+${shapes
+  .slice(0, 10)
+  .map(
+    (s) =>
+      `  - ${s.type} "${s.text || ""}" at (${Math.round(s.x)}, ${Math.round(s.y)})`,
+  )
+  .join("\n")}
+${shapes.length > 10 ? `  ... and ${shapes.length - 10} more` : ""}`
+    : "Canvas is empty - perfect for drawing diagrams!"
+}
+${
+  selected.length > 0
+    ? `Selected shapes (${selected.length}):
+${selected
+  .slice(0, 5)
+  .map(
+    (s) =>
+      `  - ${s.type} "${s.text || ""}" at (${Math.round(s.x)}, ${Math.round(s.y)})`,
+  )
+  .join("\n")}`
+    : "No shapes selected."
+}
 
 Placement guide:
 - Start new diagrams at x=${startX}, y=${startY}
 - Space shapes 120-150 pixels apart
 - Use agent_create_shape for boxes, circles, arrows
-- Use agent_create_text for labels (e.g., "3 + 5 = 8", "Node A", "Step 1")`);
+- Use agent_create_text for labels (e.g., "3 + 5 = 8", "Node A", "Step 1")
+- Use agent_label when labeling existing shapes`);
   }
 
   // Add IDE context
@@ -69,8 +92,8 @@ Placement guide:
     const { files, activeFile } = context.ide;
     parts.push(`
 ## IDE - USE THIS for code examples!
-Files: ${files.map(f => f.name).join(', ') || 'none'}
-Active file: ${activeFile?.name || 'none'} (${activeFile?.language || 'unknown'})
+Files: ${files.map((f) => f.name).join(", ") || "none"}
+Active file: ${activeFile?.name || "none"} (${activeFile?.language || "unknown"})
 
 Use ide_update_file to write code examples. For concepts like:
 - Recursion → Write a factorial or fibonacci function
@@ -86,7 +109,7 @@ Use ide_update_file to write code examples. For concepts like:
 Use notes_append to add important definitions, formulas, or summaries.`);
   }
 
-  return parts.join('\n');
+  return parts.join("\n");
 }
 
 /**

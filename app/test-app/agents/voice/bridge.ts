@@ -24,24 +24,35 @@ export interface VoicePlannerBridgeConfig {
  */
 export async function handleSpeechEnd(
   transcript: string,
-  config: VoicePlannerBridgeConfig
+  config: VoicePlannerBridgeConfig,
 ): Promise<{ handled: boolean; responseText?: string }> {
-  const { architecture, plannerConfig, runtime, eventBus, onPlannerResponse, appendLog } = config;
+  const {
+    architecture,
+    plannerConfig,
+    runtime,
+    eventBus,
+    onPlannerResponse,
+    appendLog,
+  } = config;
 
   // In realtime_tools mode, let the voice agent handle everything
   if (architecture === "realtime_tools") {
-    appendLog?.("[bridge] realtime_tools mode - voice agent handles tools directly");
+    appendLog?.(
+      "[bridge] realtime_tools mode - voice agent handles tools directly",
+    );
     return { handled: false };
   }
 
   // In split_planner mode, route to planner agent
   if (architecture === "split_planner") {
-    appendLog?.(`[bridge] split_planner mode - routing to planner: "${transcript.slice(0, 100)}..."`);
+    appendLog?.(
+      `[bridge] split_planner mode - routing to planner: "${transcript.slice(0, 100)}..."`,
+    );
 
     try {
       // Gather current space context
-      const context = gatherSpaceContext(runtime);
-      
+      const context = await gatherSpaceContext(runtime);
+
       eventBus.emit("context:gathered", {
         spaces: Object.keys(context) as any[],
         charCount: JSON.stringify(context).length,
@@ -58,7 +69,9 @@ export async function handleSpeechEnd(
       });
 
       if (result.success) {
-        appendLog?.(`[bridge] planner completed: ${result.toolCalls.length} tools, ${result.durationMs}ms`);
+        appendLog?.(
+          `[bridge] planner completed: ${result.toolCalls.length} tools, ${result.durationMs}ms`,
+        );
         onPlannerResponse(result.text);
         return { handled: true, responseText: result.text };
       } else {
@@ -88,17 +101,42 @@ export async function handleSpeechEnd(
  */
 export function shouldUsePlanner(transcript: string): boolean {
   const lowerTranscript = transcript.toLowerCase();
-  
+
   // Keywords that suggest tool usage
   const toolKeywords = [
-    "draw", "create", "add", "make", "write", "code", "run", "execute",
-    "show", "demonstrate", "visualize", "diagram", "flowchart", "chart",
-    "move", "delete", "clear", "update", "change", "modify",
-    "note", "notes", "lesson", "explain", "teach",
-    "file", "save", "open", "python", "javascript",
+    "draw",
+    "create",
+    "add",
+    "make",
+    "write",
+    "code",
+    "run",
+    "execute",
+    "show",
+    "demonstrate",
+    "visualize",
+    "diagram",
+    "flowchart",
+    "chart",
+    "move",
+    "delete",
+    "clear",
+    "update",
+    "change",
+    "modify",
+    "note",
+    "notes",
+    "lesson",
+    "explain",
+    "teach",
+    "file",
+    "save",
+    "open",
+    "python",
+    "javascript",
   ];
 
-  return toolKeywords.some(keyword => lowerTranscript.includes(keyword));
+  return toolKeywords.some((keyword) => lowerTranscript.includes(keyword));
 }
 
 /**
@@ -108,13 +146,24 @@ export function shouldUsePlanner(transcript: string): boolean {
 export function extractIntent(transcript: string): string {
   // Remove common filler phrases
   const fillers = [
-    "um", "uh", "like", "you know", "basically", "actually",
-    "can you", "could you", "would you", "please", "i want you to",
-    "i need you to", "i'd like you to", "go ahead and",
+    "um",
+    "uh",
+    "like",
+    "you know",
+    "basically",
+    "actually",
+    "can you",
+    "could you",
+    "would you",
+    "please",
+    "i want you to",
+    "i need you to",
+    "i'd like you to",
+    "go ahead and",
   ];
 
   let cleaned = transcript.toLowerCase();
-  fillers.forEach(filler => {
+  fillers.forEach((filler) => {
     cleaned = cleaned.replace(new RegExp(`\\b${filler}\\b`, "gi"), " ");
   });
 

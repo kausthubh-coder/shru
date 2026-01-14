@@ -10,20 +10,42 @@ import { tool } from "ai";
 // Whiteboard tools
 export const whiteboardTools = {
   agent_create_shape: tool({
-    description: "Create a geometric shape on the whiteboard (rectangle, ellipse, triangle, etc.)",
+    description:
+      "Create a geometric shape on the whiteboard (rectangle, ellipse, triangle, etc.)",
     parameters: z.object({
-      geo: z.enum([
-        "rectangle", "ellipse", "triangle", "diamond", "pentagon", 
-        "hexagon", "octagon", "star", "rhombus", "oval", "trapezoid",
-        "arrow-right", "arrow-left", "arrow-up", "arrow-down",
-        "cloud", "heart", "x-box", "check-box"
-      ]).default("rectangle").describe("Shape type"),
+      geo: z
+        .enum([
+          "rectangle",
+          "ellipse",
+          "triangle",
+          "diamond",
+          "pentagon",
+          "hexagon",
+          "octagon",
+          "star",
+          "rhombus",
+          "oval",
+          "trapezoid",
+          "arrow-right",
+          "arrow-left",
+          "arrow-up",
+          "arrow-down",
+          "cloud",
+          "heart",
+          "x-box",
+          "check-box",
+        ])
+        .default("rectangle")
+        .describe("Shape type"),
       x: z.number().describe("X coordinate"),
       y: z.number().describe("Y coordinate"),
       w: z.number().default(100).describe("Width"),
       h: z.number().default(80).describe("Height"),
       color: z.string().default("black").describe("Stroke color"),
-      fill: z.enum(["none", "tint", "solid", "pattern"]).default("none").describe("Fill style"),
+      fill: z
+        .enum(["none", "tint", "solid", "pattern"])
+        .default("none")
+        .describe("Fill style"),
     }),
   }),
 
@@ -36,6 +58,14 @@ export const whiteboardTools = {
       w: z.number().default(220).describe("Width"),
       h: z.number().default(60).describe("Height"),
       color: z.string().default("black").describe("Text color"),
+    }),
+  }),
+
+  agent_label: tool({
+    description: "Attach or place a text label near an existing shape",
+    parameters: z.object({
+      shapeId: z.string().describe("ID of the shape to label"),
+      text: z.string().describe("Label text"),
     }),
   }),
 
@@ -62,6 +92,11 @@ export const whiteboardTools = {
 
   agent_get_view_context: tool({
     description: "Get the current viewport and shapes context",
+    parameters: z.object({}),
+  }),
+
+  agent_get_screenshot: tool({
+    description: "Get a screenshot of the current viewport",
     parameters: z.object({}),
   }),
 };
@@ -129,9 +164,11 @@ export const allPlannerTools = {
 /**
  * Get tools for specific spaces
  */
-export function getToolsForSpaces(spaces: Array<"whiteboard" | "ide" | "notes">) {
+export function getToolsForSpaces(
+  spaces: Array<"whiteboard" | "ide" | "notes">,
+) {
   const tools: Record<string, ReturnType<typeof tool>> = {};
-  
+
   if (spaces.includes("whiteboard")) {
     Object.assign(tools, whiteboardTools);
   }
@@ -141,6 +178,6 @@ export function getToolsForSpaces(spaces: Array<"whiteboard" | "ide" | "notes">)
   if (spaces.includes("notes")) {
     Object.assign(tools, notesTools);
   }
-  
+
   return tools;
 }

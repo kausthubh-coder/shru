@@ -16,19 +16,25 @@ import { AIVoiceAgentPanel } from "./components/AIVoiceAgentPanel";
 import { createRealtimeSessionHandle } from "./agents/voice/session";
 import { buildVoiceInstructions } from "./agents/voice/config";
 import { handleSpeechEnd } from "./agents/voice/bridge";
-import { gatherSpaceContext } from "./agents/planner/agent";
 
 // Cost tracking
 import { createCostTracker, type CostTracker } from "./services/costTracker";
 
 // Existing utilities
 import { loadPyodideOnce } from "./lib/pyodide";
-import { getViewContext as computeViewContext, getViewportScreenshot } from "./lib/viewContext";
+import {
+  getViewContext as computeViewContext,
+  getViewportScreenshot,
+} from "./lib/viewContext";
 import { buildRuntime } from "./agent/runtime";
 import { buildAllTools } from "./agent/registry";
 import { NotesEditor } from "./components/NotesEditor";
 import { NotesRenderer } from "./components/NotesRenderer";
-import { serializeNotesYaml, NotesDocT, parseNotesYaml } from "./types/notesYaml";
+import {
+  serializeNotesYaml,
+  NotesDocT,
+  parseNotesYaml,
+} from "./types/notesYaml";
 import type { AgentRuntime } from "./types/toolContracts";
 
 // Dynamically load Monaco on client only
@@ -50,10 +56,20 @@ export default function PlaygroundPage() {
 
   // Use the playground hook for central state management
   const playground = usePlayground();
-  const { config, updateConfig, updatePlannerConfig, eventBus, events, clearEvents, exportEvents } = playground;
+  const {
+    config,
+    updateConfig,
+    updatePlannerConfig,
+    eventBus,
+    events,
+    clearEvents,
+    exportEvents,
+  } = playground;
 
   // Local UI state
-  const [activeTab, setActiveTab] = useState<"whiteboard" | "code" | "notes">("whiteboard");
+  const [activeTab, setActiveTab] = useState<"whiteboard" | "code" | "notes">(
+    "whiteboard",
+  );
   const [toolBusy, setToolBusy] = useState(false);
 
   // Audio meters
@@ -62,12 +78,17 @@ export default function PlaygroundPage() {
   const [muted, setMuted] = useState(false);
 
   // Voice agent state
-  const [agentStatus, setAgentStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
+  const [agentStatus, setAgentStatus] = useState<
+    "disconnected" | "connecting" | "connected"
+  >("disconnected");
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
 
   // Cost tracking state
-  const [sessionCost, setSessionCost] = useState<{ totalCostUsd: number; responseCount: number } | null>(null);
+  const [sessionCost, setSessionCost] = useState<{
+    totalCostUsd: number;
+    responseCount: number;
+  } | null>(null);
 
   // Device selection
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
@@ -83,23 +104,39 @@ export default function PlaygroundPage() {
       if (!isTool) {
         // console.log("[Playground Log]", line);
       }
-    } catch { }
+    } catch {}
   }, []);
 
   // IDE state
-  type IdeFile = { id: string; name: string; language: string; content: string };
+  type IdeFile = {
+    id: string;
+    name: string;
+    language: string;
+    content: string;
+  };
   const [files, setFiles] = useState<IdeFile[]>([
-    { id: "file-1", name: "main.py", language: "python", content: "# Welcome to the playground\nprint('Hello!')\n" },
+    {
+      id: "file-1",
+      name: "main.py",
+      language: "python",
+      content: "# Welcome to the playground\nprint('Hello!')\n",
+    },
   ]);
   const [activeFileId, setActiveFileId] = useState("file-1");
-  const activeFile = useMemo(() => files.find((f) => f.id === activeFileId) ?? files[0], [files, activeFileId]);
+  const activeFile = useMemo(
+    () => files.find((f) => f.id === activeFileId) ?? files[0],
+    [files, activeFileId],
+  );
   const [showConsole, setShowConsole] = useState(true);
-  type IdeOutput = { type: "stdout" | "stderr" | "info"; text: string; ts: number };
+  type IdeOutput = {
+    type: "stdout" | "stderr" | "info";
+    text: string;
+    ts: number;
+  };
   const [ideOutputs, setIdeOutputs] = useState<IdeOutput[]>([]);
   const [ideRunning, setIdeRunning] = useState(false);
 
   const clearConsole = useCallback(() => setIdeOutputs([]), []);
-
 
   // Notes state
   const initialYaml: NotesDocT = {
@@ -107,7 +144,9 @@ export default function PlaygroundPage() {
     version: 1,
     blocks: [{ type: "text", md: "Write here…" } as any],
   };
-  const [notesYaml, setNotesYaml] = useState(() => serializeNotesYaml(initialYaml));
+  const [notesYaml, setNotesYaml] = useState(() =>
+    serializeNotesYaml(initialYaml),
+  );
   const [showYaml, setShowYaml] = useState(false);
 
   // Device enumeration
@@ -116,54 +155,86 @@ export default function PlaygroundPage() {
       const list = await navigator.mediaDevices.enumerateDevices();
       setInputDevices(list.filter((d) => d.kind === "audioinput"));
       setOutputDevices(list.filter((d) => d.kind === "audiooutput"));
-    } catch { }
+    } catch {}
   }, []);
 
   useEffect(() => {
     refreshDevices();
     navigator.mediaDevices.addEventListener?.("devicechange", refreshDevices);
-    return () => navigator.mediaDevices.removeEventListener?.("devicechange", refreshDevices);
+    return () =>
+      navigator.mediaDevices.removeEventListener?.(
+        "devicechange",
+        refreshDevices,
+      );
   }, [refreshDevices]);
 
   // File operations
   const updateActiveFileContent = useCallback(
-    (next: string) => setFiles((prev) => prev.map((f) => (f.id === activeFileId ? { ...f, content: next } : f))),
-    [activeFileId]
+    (next: string) =>
+      setFiles((prev) =>
+        prev.map((f) => (f.id === activeFileId ? { ...f, content: next } : f)),
+      ),
+    [activeFileId],
   );
 
-  const createFile = useCallback((name: string, language: string, content: string) => {
-    const id = `file-${Date.now()}`;
-    setFiles((prev) => [...prev, { id, name, language, content }]);
-    setActiveFileId(id);
-  }, []);
+  const createFile = useCallback(
+    (name: string, language: string, content: string) => {
+      const id = `file-${Date.now()}`;
+      setFiles((prev) => [...prev, { id, name, language, content }]);
+      setActiveFileId(id);
+    },
+    [],
+  );
 
   const getActiveFileSnapshot = useCallback(() => {
     if (!activeFile) return null;
-    return { name: activeFile.name, language: activeFile.language, content: activeFile.content };
+    return {
+      name: activeFile.name,
+      language: activeFile.language,
+      content: activeFile.content,
+    };
   }, [activeFile]);
 
   // Run Python file
   const runActiveFile = useCallback(async () => {
     if (!activeFile || activeFile.language !== "python") {
-      setIdeOutputs((prev) => [{ type: "info", text: "Run supports Python only.", ts: Date.now() }, ...prev]);
+      setIdeOutputs((prev) => [
+        { type: "info", text: "Run supports Python only.", ts: Date.now() },
+        ...prev,
+      ]);
       return { stdout: "", stderr: "", info: ["Python only"] };
     }
     try {
       setIdeRunning(true);
       const pyodide = await loadPyodideOnce();
       const out: IdeOutput[] = [];
-      pyodide.setStdout({ batched: (s: string) => out.push({ type: "stdout", text: s, ts: Date.now() }) });
-      pyodide.setStderr({ batched: (s: string) => out.push({ type: "stderr", text: s, ts: Date.now() }) });
+      pyodide.setStdout({
+        batched: (s: string) =>
+          out.push({ type: "stdout", text: s, ts: Date.now() }),
+      });
+      pyodide.setStderr({
+        batched: (s: string) =>
+          out.push({ type: "stderr", text: s, ts: Date.now() }),
+      });
       await pyodide.runPythonAsync(activeFile.content);
       setIdeOutputs((prev) => [...out, ...prev].slice(0, 500));
       return {
-        stdout: out.filter((o) => o.type === "stdout").map((o) => o.text).join(""),
-        stderr: out.filter((o) => o.type === "stderr").map((o) => o.text).join(""),
+        stdout: out
+          .filter((o) => o.type === "stdout")
+          .map((o) => o.text)
+          .join(""),
+        stderr: out
+          .filter((o) => o.type === "stderr")
+          .map((o) => o.text)
+          .join(""),
         info: [],
       };
     } catch (err: any) {
       const msg = String(err?.message ?? err);
-      setIdeOutputs((prev) => [{ type: "stderr", text: msg, ts: Date.now() }, ...prev]);
+      setIdeOutputs((prev) => [
+        { type: "stderr", text: msg, ts: Date.now() },
+        ...prev,
+      ]);
       return { stdout: "", stderr: msg, info: [] };
     } finally {
       setIdeRunning(false);
@@ -183,8 +254,14 @@ export default function PlaygroundPage() {
     }
   }, []);
 
-  const getViewContext = useCallback(() => computeViewContext(editorRef.current, agentRef.current), []);
-  const getScreenshot = useCallback(async () => getViewportScreenshot(editorRef.current), []);
+  const getViewContext = useCallback(
+    () => computeViewContext(editorRef.current, agentRef.current),
+    [],
+  );
+  const getScreenshot = useCallback(
+    async () => getViewportScreenshot(editorRef.current),
+    [],
+  );
 
   // Build runtime for tools
   const buildRuntimeMemo = useCallback(() => {
@@ -193,7 +270,11 @@ export default function PlaygroundPage() {
       sessionRef,
       appendLog,
       onToolEvent: (evt: any) => {
-        eventBus.emit("tool:done", { name: evt.name, result: evt.result, durationMs: evt.ms || 0 });
+        eventBus.emit("tool:done", {
+          name: evt.name,
+          result: evt.result,
+          durationMs: evt.ms || 0,
+        });
       },
       setToolBusy,
       createFile,
@@ -203,7 +284,14 @@ export default function PlaygroundPage() {
         return !!f;
       },
       updateActiveFileContent,
-      listFilesContext: () => ({ files: files.map((f) => ({ name: f.name, language: f.language, size: f.content.length })), active: activeFile?.name }),
+      listFilesContext: () => ({
+        files: files.map((f) => ({
+          name: f.name,
+          language: f.language,
+          size: f.content.length,
+        })),
+        active: activeFile?.name,
+      }),
       getActiveFileSnapshot,
       runActiveFile,
       getScreenshot,
@@ -256,15 +344,31 @@ export default function PlaygroundPage() {
         try {
           const parsed = parseNotesYaml(notesYaml);
           if (parsed.doc) {
-            const next = { ...parsed.doc, blocks: [...parsed.doc.blocks, { type: "text", md: text } as any] };
+            const next = {
+              ...parsed.doc,
+              blocks: [...parsed.doc.blocks, { type: "text", md: text } as any],
+            };
             setNotesYaml(serializeNotesYaml(next));
           }
-        } catch { }
+        } catch {}
       },
     });
     runtimeRef.current = runtime;
     return runtime;
-  }, [files, activeFile, notesYaml, eventBus, appendLog, createFile, updateActiveFileContent, getActiveFileSnapshot, runActiveFile, getScreenshot, getViewContext, dispatchAction]);
+  }, [
+    files,
+    activeFile,
+    notesYaml,
+    eventBus,
+    appendLog,
+    createFile,
+    updateActiveFileContent,
+    getActiveFileSnapshot,
+    runActiveFile,
+    getScreenshot,
+    getViewContext,
+    dispatchAction,
+  ]);
 
   // Fetch ephemeral token
   const fetchEphemeralToken = useCallback(async () => {
@@ -277,7 +381,9 @@ export default function PlaygroundPage() {
         return null;
       }
     };
-    const site = process.env.NEXT_PUBLIC_CONVEX_SITE_URL || deriveSite(process.env.NEXT_PUBLIC_CONVEX_URL);
+    const site =
+      process.env.NEXT_PUBLIC_CONVEX_SITE_URL ||
+      deriveSite(process.env.NEXT_PUBLIC_CONVEX_URL);
     if (!site) throw new Error("Convex site URL not configured");
     const res = await fetch(`${site.replace(/\/$/, "")}/realtime/token`);
     if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`);
@@ -296,7 +402,10 @@ export default function PlaygroundPage() {
       const token = await fetchEphemeralToken();
       const runtime = buildRuntimeMemo();
       const mod = await import("@openai/agents/realtime");
-      const tools = buildAllTools((def: any) => (mod as any).tool(def), runtime);
+      const tools = buildAllTools(
+        (def: any) => (mod as any).tool(def),
+        runtime,
+      );
 
       // Initialize cost tracker
       const costTracker = createCostTracker(config.voice.model);
@@ -331,7 +440,8 @@ export default function PlaygroundPage() {
 
       // Setup mic level meter
       if (mediaStreamRef.current) {
-        const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+        const AudioContextCtor =
+          (window as any).AudioContext || (window as any).webkitAudioContext;
         const ctx = new AudioContextCtor();
         ctx.resume?.();
         audioCtxRef.current = ctx;
@@ -343,7 +453,8 @@ export default function PlaygroundPage() {
         const loop = () => {
           analyser.getFloatTimeDomainData(floatData);
           let sum = 0;
-          for (let i = 0; i < floatData.length; i++) sum += floatData[i] * floatData[i];
+          for (let i = 0; i < floatData.length; i++)
+            sum += floatData[i] * floatData[i];
           const rms = Math.sqrt(sum / floatData.length);
           setInputLevel(rms);
           if (rms > 0.01) setUserSpeaking(true);
@@ -385,13 +496,17 @@ export default function PlaygroundPage() {
                     content: [{ type: "text", text }],
                   },
                 });
-                sessionRef.current?.transport?.sendEvent?.({ type: "response.create" });
+                sessionRef.current?.transport?.sendEvent?.({
+                  type: "response.create",
+                });
               },
               appendLog,
             });
           } else {
             // In realtime_tools mode, trigger response normally
-            sessionRef.current?.transport?.sendEvent?.({ type: "response.create" });
+            sessionRef.current?.transport?.sendEvent?.({
+              type: "response.create",
+            });
           }
         }
 
@@ -402,10 +517,14 @@ export default function PlaygroundPage() {
 
           // Track costs from response
           if (costTrackerRef.current) {
-            const responseCost = costTrackerRef.current.processResponseDone(evt);
+            const responseCost =
+              costTrackerRef.current.processResponseDone(evt);
             if (responseCost) {
               const summary = costTrackerRef.current.getSessionSummary();
-              setSessionCost({ totalCostUsd: summary.totalCostUsd, responseCount: summary.responseCount });
+              setSessionCost({
+                totalCostUsd: summary.totalCostUsd,
+                responseCount: summary.responseCount,
+              });
               eventBus.emit("cost:response", {
                 audioInputTokens: responseCost.audioInputTokens,
                 audioOutputTokens: responseCost.audioOutputTokens,
@@ -425,20 +544,29 @@ export default function PlaygroundPage() {
       // Play audio
       if (audioRef.current) {
         audioRef.current.muted = false;
-        await audioRef.current.play().catch(() => { });
+        await audioRef.current.play().catch(() => {});
       }
     } catch (err: any) {
       setAgentStatus("disconnected");
       eventBus.emit("voice:error", { error: err.message || String(err) });
     }
-  }, [agentStatus, config, eventBus, fetchEphemeralToken, buildRuntimeMemo, selectedInputId, selectedOutputId, appendLog]);
+  }, [
+    agentStatus,
+    config,
+    eventBus,
+    fetchEphemeralToken,
+    buildRuntimeMemo,
+    selectedInputId,
+    selectedOutputId,
+    appendLog,
+  ]);
 
   // Stop voice agent
   const stopAgent = useCallback(async () => {
     if (agentStatus !== "connected") return;
     try {
       await sessionHandleRef.current?.disconnect?.();
-    } catch { }
+    } catch {}
     sessionRef.current = null;
     sessionHandleRef.current = null;
     setAgentStatus("disconnected");
@@ -460,19 +588,26 @@ export default function PlaygroundPage() {
     eventBus.emit("voice:disconnected", {});
 
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    try { mediaStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch { }
-    try { await audioCtxRef.current?.close?.(); } catch { }
+    try {
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    } catch {}
+    try {
+      await audioCtxRef.current?.close?.();
+    } catch {}
   }, [agentStatus, eventBus]);
 
   const toggleMute = useCallback(() => {
     const next = !muted;
     setMuted(next);
-    mediaStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !next));
+    mediaStreamRef.current
+      ?.getAudioTracks()
+      .forEach((t) => (t.enabled = !next));
   }, [muted]);
 
   const playTestTone = useCallback(() => {
     try {
-      const ctx = new ((window as any).AudioContext || (window as any).webkitAudioContext)();
+      const ctx = new ((window as any).AudioContext ||
+        (window as any).webkitAudioContext)();
       const osc = ctx.createOscillator();
       osc.type = "sine";
       osc.frequency.value = 440;
@@ -480,8 +615,11 @@ export default function PlaygroundPage() {
       gain.gain.value = 0.1;
       osc.connect(gain).connect(ctx.destination);
       osc.start();
-      setTimeout(() => { osc.stop(); ctx.close(); }, 500);
-    } catch { }
+      setTimeout(() => {
+        osc.stop();
+        ctx.close();
+      }, 500);
+    } catch {}
   }, []);
 
   // Setup tldraw agent ref
@@ -494,29 +632,56 @@ export default function PlaygroundPage() {
 
           if (_type === "create") {
             const shapeType = rest.shape?._type;
+            const shapeId = rest.shape?.shapeId
+              ? `shape:${rest.shape.shapeId}`
+              : undefined;
             if (shapeType === "text") {
               editor.createShape({
+                id: shapeId,
                 type: "text",
                 x: rest.shape?.x ?? 0,
                 y: rest.shape?.y ?? 0,
-                props: { w: rest.shape?.w ?? 220, richText: toRichText(String(rest.shape?.text ?? "")) },
+                props: {
+                  w: rest.shape?.w ?? 220,
+                  richText: toRichText(String(rest.shape?.text ?? "")),
+                  color: rest.shape?.color,
+                },
               });
             } else {
               editor.createShape({
+                id: shapeId,
                 type: "geo",
                 x: rest.shape?.x ?? 0,
                 y: rest.shape?.y ?? 0,
-                props: { w: rest.shape?.w ?? 100, h: rest.shape?.h ?? 80, geo: shapeType || "rectangle" },
+                props: {
+                  w: rest.shape?.w ?? 100,
+                  h: rest.shape?.h ?? 80,
+                  geo: shapeType || "rectangle",
+                  color: rest.shape?.color,
+                  fill: rest.shape?.fill,
+                },
               });
             }
           } else if (_type === "delete") {
             editor.deleteShape?.(`shape:${rest.shapeId}`);
           } else if (_type === "move") {
-            editor.updateShapes?.([{ id: `shape:${rest.shapeId}`, type: "geo", x: rest.x, y: rest.y }]);
+            const moveId = rest.shapeId ? `shape:${rest.shapeId}` : undefined;
+            const current = moveId ? editor.getShape(moveId) : null;
+            const nextType = rest.shapeType || current?.type || "geo";
+            if (moveId) {
+              editor.updateShapes?.([
+                { id: moveId, type: nextType, x: rest.x, y: rest.y },
+              ]);
+            }
           } else if (_type === "clear") {
             editor.deleteShapes?.(editor.getCurrentPageShapeIds());
           } else if (_type === "setMyView") {
-            editor.zoomToBounds?.({ x: rest.x, y: rest.y, w: rest.w, h: rest.h });
+            editor.zoomToBounds?.({
+              x: rest.x,
+              y: rest.y,
+              w: rest.w,
+              h: rest.h,
+            });
           }
 
           return { diff: {}, promise: Promise.resolve() };
@@ -599,7 +764,11 @@ export default function PlaygroundPage() {
           {/* Whiteboard tab */}
           {activeTab === "whiteboard" && (
             <div className="absolute inset-0">
-              <Tldraw onMount={(editor) => { editorRef.current = editor; }} />
+              <Tldraw
+                onMount={(editor) => {
+                  editorRef.current = editor;
+                }}
+              />
             </div>
           )}
 
@@ -608,13 +777,27 @@ export default function PlaygroundPage() {
             <div className="absolute inset-0 flex flex-col">
               <div className="h-12 px-4 shrink-0 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Editor</span>
+                  <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                    Editor
+                  </span>
                   <select
                     className="text-xs px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800"
                     value={activeFile?.language}
-                    onChange={(e) => setFiles((prev) => prev.map((f) => (f.id === activeFileId ? { ...f, language: e.target.value } : f)))}
+                    onChange={(e) =>
+                      setFiles((prev) =>
+                        prev.map((f) =>
+                          f.id === activeFileId
+                            ? { ...f, language: e.target.value }
+                            : f,
+                        ),
+                      )
+                    }
                   >
-                    {languageOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {languageOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="flex gap-2">
@@ -626,8 +809,11 @@ export default function PlaygroundPage() {
                     {ideRunning ? "Running…" : "Run Code"}
                   </button>
                   <button
-                    className={`text-xs px-3 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 font-medium transition-colors ${showConsole ? "bg-neutral-100 dark:bg-neutral-800" : "bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800"
-                      }`}
+                    className={`text-xs px-3 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 font-medium transition-colors ${
+                      showConsole
+                        ? "bg-neutral-100 dark:bg-neutral-800"
+                        : "bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                    }`}
                     onClick={() => setShowConsole(!showConsole)}
                   >
                     {showConsole ? "Hide Output" : "Show Output"}
@@ -640,24 +826,40 @@ export default function PlaygroundPage() {
                   language={activeFile?.language}
                   value={activeFile?.content}
                   onChange={(v) => updateActiveFileContent(v ?? "")}
-                  options={{ fontSize: 14, minimap: { enabled: false }, automaticLayout: true }}
+                  options={{
+                    fontSize: 14,
+                    minimap: { enabled: false },
+                    automaticLayout: true,
+                  }}
                 />
               </div>
               {showConsole && (
                 <div className="h-[25vh] border-t border-neutral-200 dark:border-neutral-800 bg-neutral-900 text-neutral-100 p-0 flex flex-col">
                   <div className="px-3 py-1.5 border-b border-neutral-800 bg-neutral-950 flex items-center justify-between">
-                    <span className="text-[10px] uppercase tracking-wider font-semibold text-neutral-500">Console Output</span>
+                    <span className="text-[10px] uppercase tracking-wider font-semibold text-neutral-500">
+                      Console Output
+                    </span>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => {
-                          const text = ideOutputs.map(o => `[${new Date(o.ts).toLocaleTimeString()}] ${o.text}`).join('\n');
+                          const text = ideOutputs
+                            .map(
+                              (o) =>
+                                `[${new Date(o.ts).toLocaleTimeString()}] ${o.text}`,
+                            )
+                            .join("\n");
                           navigator.clipboard.writeText(text);
                         }}
                         className="text-[10px] text-neutral-400 hover:text-white"
                       >
                         Copy
                       </button>
-                      <button onClick={clearConsole} className="text-[10px] text-neutral-400 hover:text-white">Clear</button>
+                      <button
+                        onClick={clearConsole}
+                        className="text-[10px] text-neutral-400 hover:text-white"
+                      >
+                        Clear
+                      </button>
                     </div>
                   </div>
                   <div className="flex-1 p-2 overflow-auto font-mono text-xs">
@@ -665,8 +867,13 @@ export default function PlaygroundPage() {
                       <span className="text-neutral-600 italic">No output</span>
                     ) : (
                       ideOutputs.map((o, i) => (
-                        <div key={i} className={`mb-1 break-words ${o.type === "stderr" ? "text-red-400" : o.type === "info" ? "text-blue-400" : "text-neutral-300"}`}>
-                          <span className="opacity-30 mr-2 select-none">{new Date(o.ts).toLocaleTimeString()}</span>
+                        <div
+                          key={i}
+                          className={`mb-1 break-words ${o.type === "stderr" ? "text-red-400" : o.type === "info" ? "text-blue-400" : "text-neutral-300"}`}
+                        >
+                          <span className="opacity-30 mr-2 select-none">
+                            {new Date(o.ts).toLocaleTimeString()}
+                          </span>
                           {o.text}
                         </div>
                       ))
@@ -679,10 +886,15 @@ export default function PlaygroundPage() {
 
           {/* Notes tab */}
           {activeTab === "notes" && (
-            <div className="absolute inset-0 grid" style={{ gridTemplateColumns: showYaml ? "1fr 1fr" : "1fr" }}>
+            <div
+              className="absolute inset-0 grid"
+              style={{ gridTemplateColumns: showYaml ? "1fr 1fr" : "1fr" }}
+            >
               {showYaml && (
                 <div className="p-0 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 flex flex-col min-h-0">
-                  <div className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 font-mono text-xs font-medium text-neutral-500 uppercase flex-shrink-0">YAML Source</div>
+                  <div className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 font-mono text-xs font-medium text-neutral-500 uppercase flex-shrink-0">
+                    YAML Source
+                  </div>
                   <div className="flex-1 p-4 min-h-0">
                     <NotesEditor value={notesYaml} onChange={setNotesYaml} />
                   </div>
@@ -690,7 +902,9 @@ export default function PlaygroundPage() {
               )}
               <div className="bg-white dark:bg-neutral-950 overflow-auto flex flex-col">
                 <div className="px-4 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-white dark:bg-neutral-900 sticky top-0 z-10">
-                  <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Lesson Preview</span>
+                  <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                    Lesson Preview
+                  </span>
                   <button
                     className="text-[10px] px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
                     onClick={() => setShowYaml(!showYaml)}
@@ -723,7 +937,9 @@ export default function PlaygroundPage() {
               a.click();
               URL.revokeObjectURL(url);
             }}
-            onClose={() => updateConfig({ debug: { ...config.debug, showLogs: false } })}
+            onClose={() =>
+              updateConfig({ debug: { ...config.debug, showLogs: false } })
+            }
           />
         </div>
       )}
