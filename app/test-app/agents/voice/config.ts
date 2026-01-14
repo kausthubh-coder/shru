@@ -17,7 +17,9 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
 /**
  * Build voice agent instructions based on architecture
  */
-export function buildVoiceInstructions(architecture: "realtime_tools" | "split_planner" | "specialists"): string {
+export function buildVoiceInstructions(
+  architecture: "realtime_tools" | "split_planner" | "specialists",
+): string {
   if (architecture === "realtime_tools") {
     // Original mode: voice agent handles everything
     return `You are Studi, a friendly and encouraging AI tutor.
@@ -53,6 +55,7 @@ Always respond in English.`;
 - Be warm, friendly, and encouraging
 - Acknowledge what the user asked for
 - Let them know you're working on it
+- You do NOT have direct workspace context; rely on the planner's response
 
 ## Examples
 User: "Can you draw a flowchart for a login system?"

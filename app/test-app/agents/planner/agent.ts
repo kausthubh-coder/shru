@@ -1,6 +1,5 @@
 "use client";
 
-
 import type { RunPlannerParams, PlannerResult, SpaceContext } from "../types";
 import { buildPlannerSystemPrompt } from "./prompts";
 
@@ -17,7 +16,9 @@ interface ToolDefinition {
  * Run the planner agent
  * This is called from the client but executes via API route for security
  */
-export async function runPlanner(params: RunPlannerParams): Promise<PlannerResult> {
+export async function runPlanner(
+  params: RunPlannerParams,
+): Promise<PlannerResult> {
   const { intent, context, config, runtime, eventBus } = params;
   const startTs = Date.now();
 
@@ -54,19 +55,31 @@ export async function runPlanner(params: RunPlannerParams): Promise<PlannerResul
         // Ensure toolCall has required properties
         const toolName = toolCall?.name || toolCall?.toolName;
         const toolArgs = toolCall?.args ?? {};
-        
+
         if (!toolName) {
-          console.warn("[runPlanner] Skipping tool call with missing name:", toolCall);
+          console.warn(
+            "[runPlanner] Skipping tool call with missing name:",
+            toolCall,
+          );
           continue;
         }
 
         // Log the full tool call for debugging
-        console.log("[runPlanner] Executing tool:", toolName, "with args:", JSON.stringify(toolArgs, null, 2));
-        eventBus.emit("planner:tool_call", { name: toolName });
+        console.log(
+          "[runPlanner] Executing tool:",
+          toolName,
+          "with args:",
+          JSON.stringify(toolArgs, null, 2),
+        );
+        eventBus.emit("planner:tool_call", { name: toolName, args: toolArgs });
 
         const toolStartTs = Date.now();
         try {
-          const toolResult = await executeToolLocally(toolName, toolArgs, runtime);
+          const toolResult = await executeToolLocally(
+            toolName,
+            toolArgs,
+            runtime,
+          );
           const toolDuration = Date.now() - toolStartTs;
 
           eventBus.emit("planner:tool_result", {
@@ -82,8 +95,9 @@ export async function runPlanner(params: RunPlannerParams): Promise<PlannerResul
           });
         } catch (toolError) {
           const toolDuration = Date.now() - toolStartTs;
-          const errorMsg = toolError instanceof Error ? toolError.message : String(toolError);
-          
+          const errorMsg =
+            toolError instanceof Error ? toolError.message : String(toolError);
+
           eventBus.emit("tool:error", {
             name: toolName,
             error: errorMsg,
@@ -134,18 +148,31 @@ function flattenArgs(args: unknown): Record<string, unknown> {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     return {};
   }
-  
+
   const obj = args as Record<string, unknown>;
-  
+
   // Check for common wrapper patterns from different models
   // Some models wrap args in 'input', 'arguments', 'parameters', or 'properties'
-  for (const wrapperKey of ["input", "arguments", "parameters", "properties", "args"]) {
-    if (obj[wrapperKey] && typeof obj[wrapperKey] === "object" && !Array.isArray(obj[wrapperKey])) {
-      console.log(`[flattenArgs] Found nested args in '${wrapperKey}':`, obj[wrapperKey]);
+  for (const wrapperKey of [
+    "input",
+    "arguments",
+    "parameters",
+    "properties",
+    "args",
+  ]) {
+    if (
+      obj[wrapperKey] &&
+      typeof obj[wrapperKey] === "object" &&
+      !Array.isArray(obj[wrapperKey])
+    ) {
+      console.log(
+        `[flattenArgs] Found nested args in '${wrapperKey}':`,
+        obj[wrapperKey],
+      );
       return obj[wrapperKey] as Record<string, unknown>;
     }
   }
-  
+
   return obj;
 }
 
@@ -155,42 +182,111 @@ function flattenArgs(args: unknown): Record<string, unknown> {
 async function executeToolLocally(
   toolName: string,
   args: unknown,
-  runtime: import("../../types/toolContracts").AgentRuntime
+  runtime: import("../../types/toolContracts").AgentRuntime,
 ): Promise<unknown> {
   // Ensure args is an object, handle nested wrappers
   const typedArgs = flattenArgs(args);
-  console.log("[executeToolLocally]", toolName, "flattened args:", JSON.stringify(typedArgs));
+  console.log(
+    "[executeToolLocally]",
+    toolName,
+    "flattened args:",
+    JSON.stringify(typedArgs),
+  );
 
-  // Helper to get default coordinates (center of viewport or fallback)
-  const getDefaultCoords = () => {
+  const toNumber = (value: unknown, fallback: number) =>
+    typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+  const normalizeGeo = (value: unknown) => {
+    const raw = typeof value === "string" ? value.toLowerCase() : "rectangle";
+    const map: Record<string, string> = {
+      circle: "ellipse",
+      square: "rectangle",
+      arrow: "arrow-right",
+      parallelogram: "rhombus",
+    };
+    const normalized = map[raw] ?? raw;
+    const allowed = new Set([
+      "rectangle",
+      "ellipse",
+      "triangle",
+      "diamond",
+      "pentagon",
+      "hexagon",
+      "octagon",
+      "star",
+      "rhombus",
+      "oval",
+      "trapezoid",
+      "arrow-right",
+      "arrow-left",
+      "arrow-up",
+      "arrow-down",
+      "cloud",
+      "heart",
+      "x-box",
+      "check-box",
+    ]);
+    return allowed.has(normalized) ? normalized : "rectangle";
+  };
+
+  const getViewportBounds = () => {
     try {
-      const ctx = runtime.whiteboard.getViewContext() as { viewport?: { x?: number; y?: number; w?: number; h?: number } } | null;
-      if (ctx?.viewport) {
+      const ctx = runtime.whiteboard.getViewContext() as {
+        viewport?: { x?: number; y?: number; w?: number; h?: number };
+        bounds?: { x?: number; y?: number; w?: number; h?: number };
+      } | null;
+      const viewport = ctx?.viewport ?? ctx?.bounds;
+      if (viewport) {
         return {
-          x: (ctx.viewport.x ?? 0) + (ctx.viewport.w ?? 800) / 2 - 50,
-          y: (ctx.viewport.y ?? 0) + (ctx.viewport.h ?? 600) / 2 - 40,
+          x: viewport.x ?? 0,
+          y: viewport.y ?? 0,
+          w: viewport.w ?? 800,
+          h: viewport.h ?? 600,
         };
       }
     } catch {}
+    return null;
+  };
+
+  const getDefaultCoords = () => {
+    const viewport = getViewportBounds();
+    if (viewport) {
+      return {
+        x: viewport.x + viewport.w / 2 - 50,
+        y: viewport.y + viewport.h / 2 - 40,
+      };
+    }
     return { x: 100, y: 100 };
+  };
+
+  const resolveShape = (shapeId: unknown) => {
+    if (typeof shapeId !== "string" || !shapeId) return null;
+    return runtime.whiteboard.getSimpleShape(shapeId);
   };
 
   // Whiteboard tools
   if (toolName === "agent_create_shape" || toolName === "agent_create") {
     const defaults = getDefaultCoords();
-    const x = typeof typedArgs.x === "number" ? typedArgs.x : defaults.x;
-    const y = typeof typedArgs.y === "number" ? typedArgs.y : defaults.y;
-    
+    const x = toNumber(typedArgs.x, defaults.x);
+    const y = toNumber(typedArgs.y, defaults.y);
+    const w = toNumber(typedArgs.w, 100);
+    const h = toNumber(typedArgs.h, 80);
+    const geo = normalizeGeo(typedArgs.geo);
+    const shapeId =
+      typeof typedArgs.shapeId === "string" && typedArgs.shapeId
+        ? typedArgs.shapeId
+        : Math.random().toString(36).slice(2);
+
     await runtime.whiteboard.dispatchAction({
       _type: "create",
-      intent: `Create ${typedArgs.geo || "rectangle"}`,
+      intent: `Create ${geo}`,
       shape: {
-        _type: typedArgs.geo || "rectangle",
-        shapeId: Math.random().toString(36).slice(2),
+        _type: geo,
+        shapeId,
         x,
         y,
-        w: typedArgs.w || 100,
-        h: typedArgs.h || 80,
+        w,
+        h,
         color: typedArgs.color || "black",
         fill: typedArgs.fill || "none",
       },
@@ -200,44 +296,95 @@ async function executeToolLocally(
 
   if (toolName === "agent_create_text") {
     const defaults = getDefaultCoords();
-    const x = typeof typedArgs.x === "number" ? typedArgs.x : defaults.x;
-    const y = typeof typedArgs.y === "number" ? typedArgs.y : defaults.y;
-    
+    const x = toNumber(typedArgs.x, defaults.x);
+    const y = toNumber(typedArgs.y, defaults.y);
+    const w = toNumber(typedArgs.w, 220);
+    const h = toNumber(typedArgs.h, 60);
+    const shapeId =
+      typeof typedArgs.shapeId === "string" && typedArgs.shapeId
+        ? typedArgs.shapeId
+        : Math.random().toString(36).slice(2);
+
     await runtime.whiteboard.dispatchAction({
       _type: "create",
       intent: "Create text",
       shape: {
         _type: "text",
-        shapeId: Math.random().toString(36).slice(2),
+        shapeId,
         x,
         y,
-        w: typedArgs.w || 220,
-        h: typedArgs.h || 60,
+        w,
+        h,
         text: String(typedArgs.text || "Hello"),
         color: typedArgs.color || "black",
       },
     });
-    return { status: "ok", summary: `Created text "${typedArgs.text || 'Hello'}" at (${x}, ${y})` };
+    return {
+      status: "ok",
+      summary: `Created text "${typedArgs.text || "Hello"}" at (${x}, ${y})`,
+    };
+  }
+
+  if (toolName === "agent_label") {
+    const shape = resolveShape(typedArgs.shapeId);
+    const labelText = String(typedArgs.text || "").trim();
+    if (!shape) {
+      return { status: "error", summary: "Shape not found for label" };
+    }
+    if (!labelText) {
+      return { status: "error", summary: "Missing label text" };
+    }
+    const shapeId = Math.random().toString(36).slice(2);
+    const baseX = (shape.x ?? 0) + 8;
+    const baseY = (shape.y ?? 0) + 8;
+    await runtime.whiteboard.dispatchAction({
+      _type: "create",
+      intent: "Create text label",
+      shape: {
+        _type: "text",
+        shapeId,
+        x: baseX,
+        y: baseY,
+        w: 220,
+        h: 60,
+        text: labelText,
+        color: "black",
+      },
+    });
+    const targetId = shape.shapeId || String(typedArgs.shapeId || "");
+    return { status: "ok", summary: `Added label near ${targetId}` };
   }
 
   if (toolName === "agent_move") {
+    const shape = resolveShape(typedArgs.shapeId);
+    if (!shape) {
+      return { status: "error", summary: "Shape not found for move" };
+    }
+    const x = toNumber(typedArgs.x, shape.x ?? 0);
+    const y = toNumber(typedArgs.y, shape.y ?? 0);
     await runtime.whiteboard.dispatchAction({
       _type: "move",
       intent: "Move shape",
-      shapeId: typedArgs.shapeId,
-      x: typedArgs.x,
-      y: typedArgs.y,
+      shapeId: shape.shapeId || typedArgs.shapeId,
+      shapeType: shape._type || shape.type || "geo",
+      x,
+      y,
     });
-    return { status: "ok", summary: `Moved shape to (${typedArgs.x}, ${typedArgs.y})` };
+    return { status: "ok", summary: `Moved shape to (${x}, ${y})` };
   }
 
   if (toolName === "agent_delete") {
+    const shape = resolveShape(typedArgs.shapeId);
+    if (!shape) {
+      return { status: "error", summary: "Shape not found for delete" };
+    }
     await runtime.whiteboard.dispatchAction({
       _type: "delete",
       intent: "Delete shape",
-      shapeId: typedArgs.shapeId,
+      shapeId: shape.shapeId || typedArgs.shapeId,
     });
-    return { status: "ok", summary: `Deleted shape ${typedArgs.shapeId}` };
+    const targetId = shape.shapeId || String(typedArgs.shapeId || "");
+    return { status: "ok", summary: `Deleted shape ${targetId}` };
   }
 
   if (toolName === "agent_clear") {
@@ -260,7 +407,7 @@ async function executeToolLocally(
     runtime.ide.createFile(
       String(typedArgs.name || "untitled.py"),
       String(typedArgs.language || "python"),
-      String(typedArgs.content || "")
+      String(typedArgs.content || ""),
     );
     return { status: "ok", summary: `Created file ${typedArgs.name}` };
   }
@@ -301,22 +448,72 @@ async function executeToolLocally(
 /**
  * Gather context from all active spaces
  */
-export function gatherSpaceContext(runtime: import("../../types/toolContracts").AgentRuntime): SpaceContext {
+export async function gatherSpaceContext(
+  runtime: import("../../types/toolContracts").AgentRuntime,
+): Promise<SpaceContext> {
   const context: SpaceContext = {};
+
+  const normalizeShape = (shape: any) => {
+    if (!shape) return null;
+    return {
+      shapeId: String(shape.shapeId || shape.id || ""),
+      type: String(shape.type || shape._type || "unknown"),
+      x: typeof shape.x === "number" ? shape.x : 0,
+      y: typeof shape.y === "number" ? shape.y : 0,
+      w: typeof shape.w === "number" ? shape.w : undefined,
+      h: typeof shape.h === "number" ? shape.h : undefined,
+      text: String(shape.text || shape.label || ""),
+      geo: shape.geo,
+      color: shape.color,
+      fill: shape.fill,
+    };
+  };
+
+  const normalizeCluster = (cluster: any) => {
+    if (!cluster) return null;
+    const bounds = cluster.bounds || cluster.bbox || cluster.box;
+    if (!bounds) return null;
+    return {
+      count: Number(cluster.count ?? cluster.size ?? 0) || 0,
+      bounds: {
+        x: bounds.x ?? 0,
+        y: bounds.y ?? 0,
+        w: bounds.w ?? 0,
+        h: bounds.h ?? 0,
+      },
+    };
+  };
 
   // Gather whiteboard context
   try {
     const viewContext = runtime.whiteboard.getViewContext() as any;
     if (viewContext) {
+      const viewport = viewContext.viewport ||
+        viewContext.bounds || { x: 0, y: 0, w: 1000, h: 800 };
+      const shapes = (viewContext.shapes || viewContext.blurryShapes || [])
+        .map(normalizeShape)
+        .filter(Boolean);
+      const selectedShapes = (viewContext.selectedShapes || [])
+        .map(normalizeShape)
+        .filter(Boolean);
+      const peripheralClusters = (viewContext.peripheralClusters || [])
+        .map(normalizeCluster)
+        .filter(Boolean);
+      const screenshot = await runtime.whiteboard
+        .getScreenshot()
+        .catch(() => null);
+
       context.whiteboard = {
-        viewport: viewContext.viewport || { x: 0, y: 0, w: 1000, h: 800 },
-        shapes: (viewContext.shapes || []).map((s: any) => ({
-          shapeId: s.shapeId || s.id || "",
-          type: s.type || s._type || "unknown",
-          x: s.x || 0,
-          y: s.y || 0,
-          text: s.text || s.label || "",
-        })),
+        viewport: {
+          x: viewport.x ?? 0,
+          y: viewport.y ?? 0,
+          w: viewport.w ?? 1000,
+          h: viewport.h ?? 800,
+        },
+        shapes,
+        selectedShapes,
+        peripheralClusters,
+        screenshot: screenshot || undefined,
       };
     }
   } catch (e) {
