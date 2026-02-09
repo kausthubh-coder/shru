@@ -1,0 +1,89 @@
+{
+  "$schema": "https://btca.dev/btca.schema.json",
+  "providerTimeoutMs": 300000,
+  "resources": [
+    {
+      "type": "git",
+      "name": "nextjs",
+      "url": "https://github.com/vercel/next.js",
+      "branch": "canary",
+      "searchPath": "docs",
+      "specialNotes": "Next.js framework docs. Focus on App Router patterns in docs/02-app/"
+    },
+    {
+      "type": "git",
+      "name": "tailwindcss",
+      "url": "https://github.com/tailwindlabs/tailwindcss.com",
+      "branch": "main",
+      "searchPath": "src/docs",
+      "specialNotes": "Tailwind CSS v4 documentation"
+    },
+    {
+      "type": "git",
+      "name": "convex",
+      "url": "https://github.com/get-convex/convex-backend",
+      "branch": "main",
+      "searchPath": ".",
+      "specialNotes": "Convex backend source and npm-packages. Check npm-packages/ for TypeScript SDK patterns"
+    },
+    {
+      "type": "git",
+      "name": "aiSdk",
+      "url": "https://github.com/vercel/ai",
+      "branch": "main",
+      "searchPath": "content/docs",
+      "specialNotes": "Vercel AI SDK docs. Focus on streaming, tools, and provider integrations"
+    },
+    {
+      "type": "git",
+      "name": "tldraw",
+      "url": "https://github.com/tldraw/tldraw",
+      "branch": "main",
+      "searchPath": "apps/docs",
+      "specialNotes": "tldraw v4 documentation and examples"
+    },
+    {
+      "type": "git",
+      "name": "openaiAgents",
+      "url": "https://github.com/openai/openai-agents-js",
+      "branch": "main",
+      "searchPath": ".",
+      "specialNotes": "OpenAI Agents JS SDK. Check examples/ for usage patterns"
+    },
+    {
+      "type": "git",
+      "name": "openaiRealtimeAgents",
+      "url": "https://github.com/openai/openai-realtime-agents",
+      "branch": "main",
+      "searchPath": ".",
+      "specialNotes": "OpenAI Realtime Agents reference implementation"
+    },
+    {
+      "type": "git",
+      "name": "zod",
+      "url": "https://github.com/colinhacks/zod",
+      "branch": "main",
+      "searchPath": ".",
+      "specialNotes": "Zod schema validation library. Check README and deno-lib for docs"
+    },
+    {
+      "type": "git",
+      "name": "react",
+      "url": "https://github.com/reactjs/react.dev",
+      "branch": "main",
+      "searchPath": "src/content",
+      "specialNotes": "React 19 documentation. Focus on hooks, server components, and new features"
+    },
+    {
+      "type": "git",
+      "name": "typescript",
+      "url": "https://github.com/microsoft/TypeScript-Website",
+      "branch": "v2",
+      "searchPath": "packages/documentation/copy/en",
+      "specialNotes": "TypeScript handbook and reference documentation"
+    }
+  ],
+  "model": "glm-4.7-free",
+  "provider": "opencode",
+  "dataDirectory": ".btca"
+}

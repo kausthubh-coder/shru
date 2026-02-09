@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
 export function AIVoiceAgentPanel({
   agentStatus,
   startAgent,
@@ -13,29 +11,7 @@ export function AIVoiceAgentPanel({
   outputLevel,
   agentSpeaking,
   userSpeaking,
-  architecture,
-  setArchitecture,
-  plannerModel,
-  setPlannerModel,
-  plannerSystem,
-  setPlannerSystem,
-  showLogs,
-  setShowLogs,
-  showContext,
-  setShowContext,
-  showCalls,
-  setShowCalls,
-  inputDevices,
-  outputDevices,
-  selectedInputId,
-  setSelectedInputId,
-  selectedOutputId,
-  setSelectedOutputId,
-  playTestTone,
-  pushToTalk,
-  setPushToTalk,
-  vadEagerness,
-  setVadEagerness,
+  sessionCost,
 }: {
   agentStatus: "disconnected" | "connecting" | "connected";
   startAgent: () => Promise<void> | void;
@@ -47,159 +23,106 @@ export function AIVoiceAgentPanel({
   outputLevel: number;
   agentSpeaking: boolean;
   userSpeaking: boolean;
-  architecture: "realtime_tools" | "split_planner" | "specialists";
-  setArchitecture: (v: "realtime_tools" | "split_planner" | "specialists") => void;
-  plannerModel: string;
-  setPlannerModel: (v: string) => void;
-  plannerSystem: string;
-  setPlannerSystem: (v: string) => void;
-  showLogs: boolean;
-  setShowLogs: (v: (prev: boolean) => boolean) => void;
-  showContext: boolean;
-  setShowContext: (v: (prev: boolean) => boolean) => void;
-  showCalls: boolean;
-  setShowCalls: (v: (prev: boolean) => boolean) => void;
-  inputDevices: Array<MediaDeviceInfo>;
-  outputDevices: Array<MediaDeviceInfo>;
-  selectedInputId: string;
-  setSelectedInputId: (id: string) => void;
-  selectedOutputId: string;
-  setSelectedOutputId: (id: string) => void;
-  playTestTone: () => void;
-  pushToTalk: boolean;
-  setPushToTalk: (v: boolean) => void;
-  vadEagerness: 'low'|'medium'|'high';
-  setVadEagerness: (v: 'low'|'medium'|'high') => void;
+  sessionCost?: { totalCostUsd: number; responseCount: number } | null;
 }) {
-  const [devOpen, setDevOpen] = useState(false);
   const speaking = agentSpeaking || userSpeaking;
   const level = agentSpeaking ? Math.min(1, outputLevel * 6) : Math.min(1, inputLevel * 6);
+  // Cleaner, flatter colors for better readability
   const bubbleClass = speaking
-    ? "bg-gradient-to-r from-blue-500 to-cyan-500"
-    : (userSpeaking ? "bg-gradient-to-r from-rose-500 to-orange-500" : "bg-slate-300");
-  const bubbleSize = 14 + Math.round(level * 18);
+    ? "bg-blue-500 shadow-lg shadow-blue-500/30"
+    : (userSpeaking ? "bg-amber-500 shadow-lg shadow-amber-500/30" : "bg-neutral-400 dark:bg-neutral-600");
+  const bubbleSize = 12 + Math.round(level * 16);
+
+  // Format cost display
+  const formatCost = (amount: number) => {
+    if (amount < 0.01) return `$${amount.toFixed(4)}`;
+    return `$${amount.toFixed(2)}`;
+  };
 
   return (
-    <div className="rounded-xl border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-900/30 backdrop-blur-xl shadow-2xl p-3 w-[340px] relative">
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-sm font-semibold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-cyan-400">AI Voice Agent</div>
-        <span className={`inline-flex items-center gap-1 text-[10px] ${agentStatus === 'connected' ? 'text-emerald-500' : agentStatus === 'connecting' ? 'text-amber-500' : 'text-slate-400'}`}>
-          <span className={`inline-block w-2 h-2 rounded-full ${agentStatus === 'connected' ? 'bg-emerald-500' : agentStatus === 'connecting' ? 'bg-amber-500' : 'bg-slate-400'}`} />
-          {agentStatus}
+    <div className="flex items-center gap-3 px-4 py-2 rounded-full border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl">
+      {/* Status Dot */}
+      <div className="flex items-center gap-2">
+        <div className={`w-2.5 h-2.5 rounded-full ${agentStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' :
+            agentStatus === 'connecting' ? 'bg-amber-500 animate-pulse' :
+              'bg-neutral-300 dark:bg-neutral-700'
+          }`} />
+        <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300 w-20">
+          {agentStatus === 'connected' ? 'Connected' :
+            agentStatus === 'connecting' ? 'Connecting...' :
+              'Disconnected'}
         </span>
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          {agentStatus !== "connected" ? (
-            <button className="px-3 py-1.5 rounded-md text-white text-xs bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600" onClick={startAgent}>Start</button>
-          ) : (
-            <>
-              <button className="px-3 py-1.5 rounded-md border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 text-xs hover:bg-white/40 dark:hover:bg-slate-800/60" onClick={stopAgent}>Stop</button>
-              <button className="px-3 py-1.5 rounded-md border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 text-xs hover:bg-white/40 dark:hover:bg-slate-800/60" onClick={toggleMute}>{muted ? 'Unmute' : 'Mute'}</button>
-            </>
-          )}
-        </div>
-        <div className="relative">
+
+      {/* Cost Display (when connected and has cost) */}
+      {agentStatus === 'connected' && sessionCost && sessionCost.responseCount > 0 && (
+        <>
+          <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800" />
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+              {formatCost(sessionCost.totalCostUsd)}
+            </span>
+            <span className="text-neutral-400 dark:text-neutral-500">
+              ({sessionCost.responseCount} {sessionCost.responseCount === 1 ? 'resp' : 'resps'})
+            </span>
+          </div>
+        </>
+      )}
+
+      <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800" />
+
+      {/* Controls */}
+      <div className="flex items-center gap-2">
+        {agentStatus !== "connected" ? (
           <button
-            className="px-3 py-1.5 rounded-md border border-white/20 dark:border-white/10 bg-white/20 dark:bg-slate-800/40 text-xs hover:bg-white/40 dark:hover:bg-slate-800/60"
-            onClick={() => setDevOpen((v) => !v)}
+            className="px-4 py-1.5 rounded-full bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 text-xs font-semibold hover:opacity-90 transition-opacity"
+            onClick={startAgent}
           >
-            Dev Controls
+            Start Session
           </button>
-          {devOpen && (
-            <div className="absolute right-0 bottom-9 w-56 max-h-[50vh] overflow-auto rounded-lg border border-white/20 dark:border-white/10 bg-white/60 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl p-2 z-10">
-              <div className="text-[11px] text-slate-600 dark:text-slate-300 px-1 pb-1">Playground</div>
-              <div className="grid gap-1">
-                <label className="block text-[10px] px-1">Architecture</label>
-                <select
-                  className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40"
-                  value={architecture}
-                  onChange={(e) => setArchitecture(e.target.value as any)}
-                >
-                  <option value="realtime_tools">Realtime (single agent + tools)</option>
-                  <option value="split_planner">Split (voice + planner)</option>
-                  <option value="specialists">Specialists (router + per-space)</option>
-                </select>
-                <label className="block text-[10px] px-1 mt-2">Planner model (OpenRouter)</label>
-                <input
-                  className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40"
-                  value={plannerModel}
-                  onChange={(e) => setPlannerModel(e.target.value)}
-                  placeholder="e.g. openai/gpt-4o-mini"
-                />
-                <label className="block text-[10px] px-1 mt-2">Planner extra system</label>
-                <textarea
-                  className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40 min-h-[70px]"
-                  value={plannerSystem}
-                  onChange={(e) => setPlannerSystem(e.target.value)}
-                  placeholder="Optional constraints for the planner…"
-                />
-              </div>
-              <div className="text-[11px] text-slate-600 dark:text-slate-300 px-1 pb-1">Toggles</div>
-              <div className="grid gap-1">
-                <button
-                  className={`text-[11px] px-2 py-1 rounded border ${showLogs ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200' : 'border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40 text-slate-900 dark:text-slate-100'}`}
-                  onClick={() => setShowLogs((v) => !v)}
-                >
-                  {showLogs ? 'Hide Logs' : 'Show Logs'}
-                </button>
-                <button
-                  className={`text-[11px] px-2 py-1 rounded border ${showContext ? 'bg-violet-500/20 border-violet-400/40 text-violet-200' : 'border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40 text-slate-900 dark:text-slate-100'}`}
-                  onClick={() => setShowContext((v) => !v)}
-                >
-                  {showContext ? 'Hide Context' : 'Show Context'}
-                </button>
-                <button
-                  className={`text-[11px] px-2 py-1 rounded border ${showCalls ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200' : 'border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40 text-slate-900 dark:text-slate-100'}`}
-                  onClick={() => setShowCalls((v) => !v)}
-                >
-                  {showCalls ? 'Hide Calls' : 'Show Calls'}
-                </button>
-              </div>
-              <div className="mt-2 border-t border-white/20 dark:border-white/10 pt-2">
-                <div className="text-[11px] text-slate-600 dark:text-slate-300 px-1 pb-1">Audio Devices</div>
-                <label className="block text-[10px] px-1">Microphone</label>
-                <select className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40" value={selectedInputId} onChange={(e) => setSelectedInputId(e.target.value)}>
-                  <option value="">System default</option>
-                  {inputDevices.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>
-                  ))}
-                </select>
-                <label className="block text-[10px] px-1 mt-2">Speaker</label>
-                <select className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40" value={selectedOutputId} onChange={(e) => setSelectedOutputId(e.target.value)}>
-                  <option value="">System default</option>
-                  {outputDevices.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>
-                  ))}
-                </select>
-                <div className="mt-2 flex items-center justify-between">
-                  <button className="text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40 hover:bg-white/20 dark:hover:bg-slate-800/60" onClick={playTestTone}>Play test tone</button>
-                </div>
-              </div>
-              <div className="mt-2 border-t border-white/20 dark:border-white/10 pt-2">
-                <div className="text-[11px] text-slate-600 dark:text-slate-300 px-1 pb-1">Turn Detection</div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px]">Push‑to‑talk</span>
-                  <input type="checkbox" className="accent-emerald-500" checked={pushToTalk} onChange={(e) => setPushToTalk(e.target.checked)} />
-                </div>
-                <label className="block text-[10px] px-1">VAD eagerness</label>
-                <select className="w-full text-[11px] px-2 py-1 rounded border border-white/20 dark:border-white/10 bg-white/10 dark:bg-slate-800/40" value={vadEagerness} onChange={(e) => setVadEagerness(e.target.value as any)}>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="grid place-items-center">
-          <div className={`rounded-full transition-all ${bubbleClass}`} style={{ width: `${bubbleSize}px`, height: `${bubbleSize}px` }} />
-        </div>
+        ) : (
+          <>
+            <button
+              className={`p-2 rounded-full transition-colors ${muted
+                  ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                  : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                }`}
+              onClick={toggleMute}
+              title={muted ? "Unmute" : "Mute"}
+            >
+              {muted ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clipRule="evenodd" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                </svg>
+              )}
+            </button>
+            <button
+              className="px-4 py-1.5 rounded-full border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              onClick={stopAgent}
+            >
+              End
+            </button>
+          </>
+        )}
       </div>
+
+      {/* Visualizer */}
+      <div className="w-8 h-8 grid place-items-center">
+        <div
+          className={`rounded-full transition-all duration-75 ease-out ${bubbleClass}`}
+          style={{ width: `${bubbleSize}px`, height: `${bubbleSize}px` }}
+        />
+      </div>
+
       {toolBusy && (
-        <div className="mt-2 flex items-center justify-start text-[11px] text-slate-600 dark:text-slate-300">
-          <span className="inline-block w-2 h-2 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 mr-2" />
-          Running tool…
+        <div className="ml-2 flex items-center gap-1.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+          Thinking...
         </div>
       )}
     </div>

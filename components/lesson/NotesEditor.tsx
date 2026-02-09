@@ -41,6 +41,7 @@ export function NotesEditor({ value, onChange, readOnly }: NotesEditorProps) {
           theme="vs-dark"
           language="yaml"
           value={local}
+          height="100%"
           onChange={(v) => setLocal(v ?? "")}
           options={{
             fontSize: 13,
