@@ -46,5 +46,5 @@ package-lock.json
 # clerk configuration (can include secrets)
 /.clerk/
 
-# btca local config
-~/
+# btca local cache
+.btca/

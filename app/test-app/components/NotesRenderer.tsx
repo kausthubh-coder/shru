@@ -3,8 +3,9 @@
 import React, { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeSanitize from "rehype-sanitize";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { parseNotesYaml, NotesDocT, BlockT } from "../types/notesYaml";
 
 export function NotesRenderer({ yaml }: { yaml: string }) {
@@ -39,12 +40,27 @@ export function NotesRenderer({ yaml }: { yaml: string }) {
   );
 }
 
+// Helper component to render text with inline LaTeX math
+function MathText({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={{
+        p: ({ children }) => <span>{children}</span>,
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
+
 function BlockView({ block }: { block: BlockT }) {
   switch (block.type) {
     case "text":
       return (
-        <div className="prose prose-invert max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>
+        <div className="prose prose-invert prose-lg max-w-none prose-headings:mt-8 prose-headings:mb-4 prose-p:my-4 prose-hr:my-8">
+          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
             {block.md}
           </ReactMarkdown>
         </div>
@@ -55,6 +71,8 @@ function BlockView({ block }: { block: BlockT }) {
       return <InputBlockView id={block.id} label={block.label} inputType={block.inputType} placeholder={block.placeholder} />;
     case "embed":
       return <EmbedBlockView id={block.id} provider={block.provider} refId={block.ref} height={block.height} />;
+    case "custom":
+      return <CustomBlockView id={block.id} title={block.title} html={block.html} css={block.css} js={block.js} height={block.height} />;
     default:
       return null as any;
   }
@@ -72,19 +90,19 @@ function QuizBlockView({ id, title, questions }: { id: string; title?: string; q
       <ol className="space-y-3 list-decimal ml-4">
         {questions.map((q) => (
           <li key={q.id} className="space-y-1">
-            <div className="text-sm text-slate-100">{q.prompt}</div>
+            <div className="text-sm text-slate-100"><MathText text={q.prompt} /></div>
             <div className="grid gap-1">
               {q.options.map((opt) => (
                 <label key={opt} className="inline-flex items-center gap-2 text-sm text-slate-200">
                   <input type="radio" name={`${id}-${q.id}`} checked={answers[q.id] === opt} onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))} />
-                  <span>{opt}</span>
+                  <span><MathText text={opt} /></span>
                 </label>
               ))}
             </div>
             {submitted && (
               <div className={answers[q.id] === q.answer ? "text-emerald-400 text-xs" : "text-red-400 text-xs"}>
-                {answers[q.id] === q.answer ? "Correct" : `Incorrect. Answer: ${q.answer}`}
-                {q.explanation ? <span className="ml-2 text-slate-300">{q.explanation}</span> : null}
+                {answers[q.id] === q.answer ? "Correct" : <>Incorrect. Answer: <MathText text={q.answer} /></>}
+                {q.explanation ? <span className="ml-2 text-slate-300"><MathText text={q.explanation} /></span> : null}
               </div>
             )}
           </li>
@@ -131,6 +149,49 @@ function EmbedBlockView({ id, provider, refId, height }: { id: string; provider:
         style={{ width: "100%", height: `${height}px`, border: 0 }}
         sandbox="allow-scripts allow-forms allow-pointer-lock allow-popups allow-top-navigation-by-user-activation"
         referrerPolicy="no-referrer"
+      />
+    </div>
+  );
+}
+
+function CustomBlockView({ id, title, html, css, js, height }: { id: string; title?: string; html: string; css?: string; js?: string; height: number }) {
+  const srcDoc = useMemo(() => {
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; padding: 8px; font-family: system-ui, sans-serif; background: #1e293b; color: #f1f5f9; }
+${css || ""}
+</style>
+</head>
+<body>
+${html}
+<script>
+try {
+${js || ""}
+} catch (e) {
+  console.error("Custom block error:", e);
+}
+</script>
+</body>
+</html>`;
+  }, [html, css, js]);
+
+  return (
+    <div className="rounded-lg overflow-hidden border border-white/10">
+      {title && (
+        <div className="text-sm font-medium px-3 py-2 bg-slate-800/80 border-b border-white/10 text-slate-200">
+          {title}
+        </div>
+      )}
+      <iframe
+        title={`custom-${id}`}
+        srcDoc={srcDoc}
+        style={{ width: "100%", height: `${height}px`, border: 0 }}
+        sandbox="allow-scripts"
       />
     </div>
   );
