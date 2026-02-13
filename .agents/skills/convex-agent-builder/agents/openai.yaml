@@ -1,0 +1,4 @@
+interface:
+  display_name: "Convex Agent Builder"
+  short_description: "Build and debug Convex Agent component integrations"
+  default_prompt: "Implement or improve a Convex Agent workflow using the bundled references and repo conventions."
